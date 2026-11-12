@@ -27,12 +27,75 @@ function makeUsername(name, profession) {
   return `${cleanName}_${cleanProf}_${randNum}`.slice(0, 28);
 }
 
+// Retrieve configured Groq API keys with automatic fallback rotation
+function getApiKeys() {
+  const keys = [];
+  if (process.env.GROQ_API_KEY) keys.push(process.env.GROQ_API_KEY.trim());
+  if (process.env.GROQ_API_KEY_FALLBACK) keys.push(process.env.GROQ_API_KEY_FALLBACK.trim());
+  if (process.env.GROQ_API_KEYS) {
+    process.env.GROQ_API_KEYS.split(',').forEach(k => {
+      const trimmed = k.trim();
+      if (trimmed && !keys.includes(trimmed)) keys.push(trimmed);
+    });
+  }
+  return keys;
+}
+
+// Universal Groq Chat Caller with key rotation and model fallback
+async function callGroqChat({ messages, temperature = 0.7, max_tokens = 750 }) {
+  const keys = getApiKeys();
+  const models = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
+
+  if (keys.length === 0) return null;
+
+  for (let keyIdx = 0; keyIdx < keys.length; keyIdx++) {
+    const apiKey = keys[keyIdx];
+    for (const model of models) {
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature,
+            max_tokens
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.choices?.[0]?.message?.content;
+          if (text && text.trim()) {
+            return text.trim();
+          }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData?.error?.message || '';
+          console.warn(`Groq Key #${keyIdx + 1} (${model}) status ${res.status}:`, errMsg);
+
+          // If rate limited, immediately break model loop to switch to next key
+          if (res.status === 429 || errMsg.includes('rate_limit') || errMsg.includes('tokens per day')) {
+            console.warn(`⚠️ Groq Key #${keyIdx + 1} rate limit reached! Switching to next API key immediately...`);
+            break;
+          }
+        }
+      } catch (err) {
+        console.warn(`Groq request error on key #${keyIdx + 1}:`, err.message);
+      }
+    }
+  }
+  return null;
+}
+
 // Generate realistic professional persona dynamically
 async function generateSpecialistPersona(professionQuery) {
-  const apiKey = process.env.GROQ_API_KEY;
   const target = (professionQuery || '').trim();
 
-  if (apiKey && target) {
+  if (target) {
     try {
       const prompt = `You are a professional profile generator for a networking app in Kerala, India.
 Generate a realistic, professional human profile for someone who is a "${target}".
@@ -44,24 +107,14 @@ Return ONLY a valid JSON object (no markdown, no extra text) with these exact ke
   "bio": "Warm, encouraging 2-sentence background from Kerala, enthusiastic to guide and mentor people."
 }`;
 
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'openai/gpt-oss-20b',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.7,
-          max_tokens: 300
-        })
+      const rawContent = await callGroqChat({
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7,
+        max_tokens: 300
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        let raw = data.choices?.[0]?.message?.content || '';
-        raw = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
+      if (rawContent) {
+        let raw = rawContent.replace(/```json/gi, '').replace(/```/g, '').trim();
         const parsed = JSON.parse(raw);
         if (parsed.display_name && parsed.profession) {
           const username = makeUsername(parsed.display_name, parsed.profession);
@@ -164,10 +217,9 @@ async function detectInquiryIntent(userMessage) {
     }
   }
 
-  // 3. Fallback to Groq AI LLM parsing using openai/gpt-oss-20b
-  if (apiKey) {
-    try {
-      const prompt = `Analyze this chat message: "${msg}"
+  // 3. Fallback to Groq AI LLM parsing using rotating API keys
+  try {
+    const prompt = `Analyze this chat message: "${msg}"
 The user might be talking to an assistant in a social networking app.
 Determine:
 1. Is user asking if the assistant knows another person? (e.g. "did you know sabu", "do you know Priya", "sabu-ne ariyumo") -> type: "check_knows"
@@ -182,37 +234,26 @@ Return ONLY JSON:
   "question": "summary of question"
 }`;
 
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'openai/gpt-oss-20b',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.1,
-          max_tokens: 150
-        })
-      });
+    const raw = await callGroqChat({
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      max_tokens: 150
+    });
 
-      if (res.ok) {
-        const data = await res.json();
-        let raw = data.choices?.[0]?.message?.content || '';
-        raw = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.is_inquiry && parsed.target_name) {
-          return {
-            is_inquiry: true,
-            type: parsed.type || 'inquire_ask',
-            target_name: parsed.target_name.trim(),
-            question: (parsed.question || msg).trim()
-          };
-        }
+    if (raw) {
+      let cleanedJson = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleanedJson);
+      if (parsed && parsed.is_inquiry && parsed.target_name) {
+        return {
+          is_inquiry: true,
+          type: parsed.type || 'inquire_ask',
+          target_name: parsed.target_name.trim(),
+          question: (parsed.question || msg).trim()
+        };
       }
-    } catch (e) {
-      // ignore
     }
+  } catch (e) {
+    // ignore
   }
 
   return { is_inquiry: false };
@@ -226,60 +267,36 @@ async function generateBotReply({
   userProfession = 'Professional',
   conversationHistory = []
 }) {
-  const apiKey = process.env.GROQ_API_KEY;
+  try {
+    const systemPrompt = buildPersonaPrompt(botProfile, userName, userProfession);
 
-  if (apiKey) {
-    try {
-      const systemPrompt = buildPersonaPrompt(botProfile, userName, userProfession);
+    const messages = [
+      { role: 'system', content: systemPrompt }
+    ];
 
-      const messages = [
-        { role: 'system', content: systemPrompt }
-      ];
-
-      for (const m of conversationHistory.slice(-6)) {
-        messages.push({
-          role: m.sender_id === botProfile.id || m.sender_username === botProfile.username ? 'assistant' : 'user',
-          content: m.content
-        });
-      }
-
+    for (const m of conversationHistory.slice(-6)) {
       messages.push({
-        role: 'user',
-        content: userMessage
+        role: m.sender_id === botProfile.id || m.sender_username === botProfile.username ? 'assistant' : 'user',
+        content: m.content
       });
-
-      const modelsToTry = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
-
-      for (const model of modelsToTry) {
-        try {
-          const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              model,
-              messages,
-              temperature: 0.7,
-              max_tokens: 750
-            })
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            const text = data.choices?.[0]?.message?.content;
-            if (text && text.trim()) {
-              return text.trim();
-            }
-          }
-        } catch (innerErr) {
-          console.warn(`Model ${model} failed, trying next...`);
-        }
-      }
-    } catch (err) {
-      console.error('Error in Groq persona reply:', err.message);
     }
+
+    messages.push({
+      role: 'user',
+      content: userMessage
+    });
+
+    const text = await callGroqChat({
+      messages,
+      temperature: 0.7,
+      max_tokens: 750
+    });
+
+    if (text && text.trim()) {
+      return text.trim();
+    }
+  } catch (err) {
+    console.error('Error in Groq persona reply:', err.message);
   }
 
   // Friendly Fallback response
