@@ -6,7 +6,7 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const db = require('./db/database');
-const { BOT_USER, generateSpecialistPersona, generateBotReply } = require('./bot/ai');
+const { BOT_USER, generateSpecialistPersona, generateBotReply, detectInquiryIntent } = require('./bot/ai');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'prochat-secret-key-2026-secure';
 const PORT = process.env.PORT || 3000;
@@ -332,6 +332,69 @@ io.on('connection', (socket) => {
         aiBotUserIds.add(recipientId);
         setTimeout(async () => {
           try {
+            // Check if user is asking this specialist to contact or ask someone else
+            const inquiry = await detectInquiryIntent(content);
+            if (inquiry && inquiry.is_inquiry && inquiry.target_name) {
+              console.log(`🤖 Cross-inquiry triggered: User asks ${recipient.display_name} to contact ${inquiry.target_name}`);
+
+              // 1. Search for target in database
+              const matches = await db.searchUsers({ query: inquiry.target_name });
+              const target = matches.find(u => u.id !== userId && u.id !== recipientId) || matches[0];
+
+              if (!target || target.id === recipientId || target.id === userId) {
+                const notFoundReply = `ക്ഷമിക്കണം ${user.display_name}, '${inquiry.target_name}' എന്ന പേരിൽ ആരെയും നമ്മുടെ നെറ്റ്‌വർക്കിൽ ഇപ്പോൾ കാണുന്നില്ല. വേണമെങ്കിൽ വേൾഡ് ചാറ്റിൽ '@find ${inquiry.target_name}' എന്ന് നൽകിയാൽ നമുക്ക് ഉടൻ കണ്ടെത്താം കേട്ടോ! 😊`;
+                const savedBotMsg = await db.saveDirectMessage(recipientId, userId, notFoundReply);
+                io.to(`user_${userId}`).emit('new_direct_message', savedBotMsg);
+                return;
+              }
+
+              // 2. Bot acknowledges user immediately
+              const ackMsg = `തീർച്ചയായും! ഞാൻ ഇപ്പോൾ തന്നെ ${target.display_name}-ന് (${target.profession}) മെസ്സേജ് അയച്ചു ചോദിക്കാം. ഒരു മിനിറ്റ് കാക്കൂ കേട്ടോ! ⏳`;
+              const savedAckMsg = await db.saveDirectMessage(recipientId, userId, ackMsg);
+              io.to(`user_${userId}`).emit('new_direct_message', savedAckMsg);
+
+              // 3. Bot sends direct message to target
+              const inquiryMsgToTarget = `ഹലോ ${target.display_name}! നമ്മുടെ സുഹൃത്ത് ${user.display_name} താങ്കളോട് ഒരു കാര്യം ചോദിക്കാൻ എന്നോട് പറഞ്ഞിരുന്നു: "${inquiry.question}". താങ്കൾ ഇപ്പോൾ എന്താണ് ചെയ്യുന്നത് / ഇതിനെക്കുറിച്ച് എന്താണ് പറയാനുള്ളത്? ഒന്നു പറയാമോ? 😊`;
+              const savedInquiryToTarget = await db.saveDirectMessage(recipientId, target.id, inquiryMsgToTarget);
+              io.to(`user_${target.id}`).emit('new_direct_message', savedInquiryToTarget);
+              io.to(`user_${recipientId}`).emit('new_direct_message', savedInquiryToTarget);
+
+              // 4. Target responds back to Bot (simulated via AI based on target's profile if target is bot or offline)
+              setTimeout(async () => {
+                try {
+                  const targetReply = await generateBotReply({
+                    botProfile: target,
+                    userMessage: inquiryMsgToTarget,
+                    userName: recipient.display_name,
+                    userProfession: recipient.profession,
+                    conversationHistory: [savedInquiryToTarget]
+                  });
+
+                  // Save target's response to bot
+                  const savedTargetResponse = await db.saveDirectMessage(target.id, recipientId, targetReply);
+                  io.to(`user_${recipientId}`).emit('new_direct_message', savedTargetResponse);
+                  io.to(`user_${target.id}`).emit('new_direct_message', savedTargetResponse);
+
+                  // 5. Bot reports back to original User
+                  setTimeout(async () => {
+                    try {
+                      const reportBackMsg = `ഞാൻ ${target.display_name}-നോട് ചോദിച്ചിരുന്നു കേട്ടോ! അവർ പറഞ്ഞ മറുപടി ഇതാണ്:\n\n💬 "${targetReply}"\n\nകൂടുതൽ എന്തെങ്കിലും അറിയണമെന്നുണ്ടോ? ഞാൻ ചോദിച്ചു തരാം! 😊`;
+                      const savedReportMsg = await db.saveDirectMessage(recipientId, userId, reportBackMsg);
+                      io.to(`user_${userId}`).emit('new_direct_message', savedReportMsg);
+                    } catch (errReport) {
+                      console.error('Error sending report back to user:', errReport);
+                    }
+                  }, 1200);
+
+                } catch (errTargetReply) {
+                  console.error('Error generating target reply:', errTargetReply);
+                }
+              }, 1500);
+
+              return; // Stop here, inquiry handled
+            }
+
+            // Normal 1-on-1 response if not a cross-inquiry
             const history = await db.getDirectMessagesBetween(userId, recipientId, 8);
             const botReply = await generateBotReply({
               botProfile: recipient,

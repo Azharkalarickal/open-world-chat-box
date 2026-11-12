@@ -121,6 +121,77 @@ CRITICAL RULES - FOLLOW STRICTLY:
 6. Formatting: Use clean bullet points or numbers for readability, like a friendly WhatsApp chat.`;
 }
 
+// Detect if user is asking this person/bot to contact or ask someone else
+async function detectInquiryIntent(userMessage) {
+  const apiKey = process.env.GROQ_API_KEY;
+  const msg = (userMessage || '').trim();
+  if (!msg) return { is_inquiry: false };
+
+  // Fast check: common inquiry patterns in Malayalam / Manglish / English
+  const inquiryRegex = /(chodikk|chothikk|paranj|parayu|message ayakk|ask|tell|check with|contact|enth cheyyunnu|evideya|eppo)/i;
+  if (!inquiryRegex.test(msg) && !msg.toLowerCase().includes('ask')) {
+    return { is_inquiry: false };
+  }
+
+  if (apiKey) {
+    try {
+      const prompt = `Analyze this chat message in a Malayalam/English networking app.
+Determine if the user is asking the speaker to contact, message, ask, or find out something from another specific person or professional (e.g. "Ramesh enth cheyyunnu enn onnu chodikkamo", "Dr. Arun-നോട് ചോദിക്കാമോ", "Can you ask Priya about her project?").
+
+User Message: "${msg}"
+
+Return ONLY a JSON object (no markdown, no quotes, no extra text):
+{
+  "is_inquiry": true or false,
+  "target_name": "clean name or professional title of the person to contact (e.g. Ramesh, Dr. Arun, Priya), or empty string if false",
+  "question": "what the user wants to ask or find out from that person (in natural Malayalam or English)"
+}`;
+
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'qwen/qwen3.8-27b',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.2,
+          max_tokens: 150
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        let raw = data.choices?.[0]?.message?.content || '';
+        raw = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.is_inquiry && parsed.target_name) {
+          return {
+            is_inquiry: true,
+            target_name: parsed.target_name.trim(),
+            question: (parsed.question || msg).trim()
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('Inquiry intent detection parse issue:', e.message);
+    }
+  }
+
+  // Regex fallback: e.g. "Ramesh enth cheyyunnu" or "ask Ramesh"
+  const askMatch = msg.match(/(?:ask|chodikk|chothikk)\s+([A-Za-z]+)/i) || msg.match(/^([A-Za-z]+)\s+(?:enth|evide|eppo|aano)/i);
+  if (askMatch && askMatch[1] && askMatch[1].length > 2) {
+    return {
+      is_inquiry: true,
+      target_name: askMatch[1],
+      question: msg
+    };
+  }
+
+  return { is_inquiry: false };
+}
+
 // Generate response for any persona (ProBot or dynamic specialist)
 async function generateBotReply({
   botProfile = BOT_USER,
@@ -192,5 +263,6 @@ async function generateBotReply({
 module.exports = {
   BOT_USER,
   generateSpecialistPersona,
-  generateBotReply
+  generateBotReply,
+  detectInquiryIntent
 };
