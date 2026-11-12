@@ -13,6 +13,7 @@ const PORT = process.env.PORT || 3000;
 
 let BOT_USER_ID = null;
 const aiBotUserIds = new Set();
+const pendingInquiries = new Map(); // tracks targetId_botId -> { originalUserId, question }
 
 const app = express();
 const server = http.createServer(app);
@@ -330,12 +331,29 @@ io.on('connection', (socket) => {
       // If recipient is any AI Specialist Bot (including ProBot)
       if (aiBotUserIds.has(recipientId) || (recipient && recipient.bio && recipient.bio.includes('[AI Professional]'))) {
         aiBotUserIds.add(recipientId);
+
+        // Check if this incoming message is from a user answering a pending inquiry from this bot
+        const pendingKey = `${userId}_${recipientId}`;
+        if (pendingInquiries.has(pendingKey)) {
+          const original = pendingInquiries.get(pendingKey);
+          pendingInquiries.delete(pendingKey);
+          setTimeout(async () => {
+            try {
+              const forwardMsg = `${user.display_name} താങ്കൾ ചോദിച്ചതിന് ഇപ്പോൾ മറുപടി നൽകിയിട്ടുണ്ട് കേട്ടോ! 📩\n\n💬 "${content}"\n\nതുടർന്ന് സംസാരിക്കാൻ വേണമെങ്കിൽ ${user.display_name}-ന് നേരിട്ട് മെസ്സേജ് അയക്കാവുന്നതാണ്! 😊`;
+              const savedFwd = await db.saveDirectMessage(recipientId, original.originalUserId, forwardMsg);
+              io.to(`user_${original.originalUserId}`).emit('new_direct_message', savedFwd);
+            } catch (errFwd) {
+              console.error('Error forwarding user reply:', errFwd);
+            }
+          }, 800);
+        }
+
         setTimeout(async () => {
           try {
-            // Check if user is asking this specialist to contact or ask someone else
+            // Check if user is asking about someone or asking to contact someone
             const inquiry = await detectInquiryIntent(content);
             if (inquiry && inquiry.is_inquiry && inquiry.target_name) {
-              console.log(`🤖 Cross-inquiry triggered: User asks ${recipient.display_name} to contact ${inquiry.target_name}`);
+              console.log(`🤖 Inquiry detected (${inquiry.type}): User asks ${recipient.display_name} about ${inquiry.target_name}`);
 
               // 1. Search for target in database
               const matches = await db.searchUsers({ query: inquiry.target_name });
@@ -348,53 +366,84 @@ io.on('connection', (socket) => {
                 return;
               }
 
-              // 2. Bot acknowledges user immediately
+              // --- TYPE 1: CHECK IF BOT KNOWS THE PERSON ("did you know sabu", "sabu-ne ariyumo") ---
+              if (inquiry.type === 'check_knows') {
+                const pastMsgs = await db.getDirectMessagesBetween(recipientId, target.id, 5);
+                const haveChatted = pastMsgs && pastMsgs.length > 0;
+                let replyText = '';
+                if (haveChatted) {
+                  replyText = `അതെ ${user.display_name}, എനിക്ക് ${target.display_name}-നെ അറിയാം! ഞങ്ങൾ തമ്മിൽ മുൻപ് സംസാരിച്ചിട്ടുണ്ട്. ${target.display_name} ഒരു ${target.profession} ആണ്. താങ്കൾക്ക് ${target.display_name}-നോട് എന്തെങ്കിലും ചോദിക്കാനുണ്ടോ? ഉണ്ടെങ്കിൽ പറയൂ, ഞാൻ ചോദിച്ചു തരാം! 😊`;
+                } else {
+                  replyText = `എനിക്ക് ${target.display_name}-നെ നേരിട്ട് പരിചയമില്ല ${user.display_name}, ഞങ്ങൾ തമ്മിൽ ഇതുവരെ സംസാരിക്കുകയോ ചാറ്റ് ചെയ്യുകയോ ചെയ്തിട്ടില്ല. പക്ഷെ നമ്മുടെ പ്രോചാറ്റ് നെറ്റ്‌വർക്കിൽ ${target.display_name} (${target.profession}) ഉണ്ട്. താങ്കൾക്ക് എന്തെങ്കിലും ചോദിക്കണമെങ്കിൽ പറയൂ, ഞാൻ ഇപ്പോൾ തന്നെ ഒരു മെസ്സേജ് അയച്ചു ചോദിച്ചു തരാം കേട്ടോ! 😊`;
+                }
+                const savedBotMsg = await db.saveDirectMessage(recipientId, userId, replyText);
+                io.to(`user_${userId}`).emit('new_direct_message', savedBotMsg);
+                return;
+              }
+
+              // --- TYPE 2: ASK / CONTACT PERSON ("sabu ippol enth cheyyunnu", "ask sabu...") ---
+              // Step 1: Immediate acknowledgement to user
               const ackMsg = `തീർച്ചയായും! ഞാൻ ഇപ്പോൾ തന്നെ ${target.display_name}-ന് (${target.profession}) മെസ്സേജ് അയച്ചു ചോദിക്കാം. ഒരു മിനിറ്റ് കാക്കൂ കേട്ടോ! ⏳`;
               const savedAckMsg = await db.saveDirectMessage(recipientId, userId, ackMsg);
               io.to(`user_${userId}`).emit('new_direct_message', savedAckMsg);
 
-              // 3. Bot sends direct message to target
+              // Step 2: Send direct message to target
               const inquiryMsgToTarget = `ഹലോ ${target.display_name}! നമ്മുടെ സുഹൃത്ത് ${user.display_name} താങ്കളോട് ഒരു കാര്യം ചോദിക്കാൻ എന്നോട് പറഞ്ഞിരുന്നു: "${inquiry.question}". താങ്കൾ ഇപ്പോൾ എന്താണ് ചെയ്യുന്നത് / ഇതിനെക്കുറിച്ച് എന്താണ് പറയാനുള്ളത്? ഒന്നു പറയാമോ? 😊`;
               const savedInquiryToTarget = await db.saveDirectMessage(recipientId, target.id, inquiryMsgToTarget);
               io.to(`user_${target.id}`).emit('new_direct_message', savedInquiryToTarget);
               io.to(`user_${recipientId}`).emit('new_direct_message', savedInquiryToTarget);
 
-              // 4. Target responds back to Bot (simulated via AI based on target's profile if target is bot or offline)
-              setTimeout(async () => {
-                try {
-                  const targetReply = await generateBotReply({
-                    botProfile: target,
-                    userMessage: inquiryMsgToTarget,
-                    userName: recipient.display_name,
-                    userProfession: recipient.profession,
-                    conversationHistory: [savedInquiryToTarget]
-                  });
+              const isTargetBot = aiBotUserIds.has(target.id) || (target.bio && target.bio.includes('[AI Professional]'));
 
-                  // Save target's response to bot
-                  const savedTargetResponse = await db.saveDirectMessage(target.id, recipientId, targetReply);
-                  io.to(`user_${recipientId}`).emit('new_direct_message', savedTargetResponse);
-                  io.to(`user_${target.id}`).emit('new_direct_message', savedTargetResponse);
+              if (isTargetBot) {
+                // Target is an AI bot -> Simulate immediate reply
+                setTimeout(async () => {
+                  try {
+                    const targetReply = await generateBotReply({
+                      botProfile: target,
+                      userMessage: inquiryMsgToTarget,
+                      userName: recipient.display_name,
+                      userProfession: recipient.profession,
+                      conversationHistory: [savedInquiryToTarget]
+                    });
 
-                  // 5. Bot reports back to original User
-                  setTimeout(async () => {
-                    try {
-                      const reportBackMsg = `ഞാൻ ${target.display_name}-നോട് ചോദിച്ചിരുന്നു കേട്ടോ! അവർ പറഞ്ഞ മറുപടി ഇതാണ്:\n\n💬 "${targetReply}"\n\nകൂടുതൽ എന്തെങ്കിലും അറിയണമെന്നുണ്ടോ? ഞാൻ ചോദിച്ചു തരാം! 😊`;
-                      const savedReportMsg = await db.saveDirectMessage(recipientId, userId, reportBackMsg);
-                      io.to(`user_${userId}`).emit('new_direct_message', savedReportMsg);
-                    } catch (errReport) {
-                      console.error('Error sending report back to user:', errReport);
-                    }
-                  }, 1200);
+                    const savedTargetResponse = await db.saveDirectMessage(target.id, recipientId, targetReply);
+                    io.to(`user_${recipientId}`).emit('new_direct_message', savedTargetResponse);
+                    io.to(`user_${target.id}`).emit('new_direct_message', savedTargetResponse);
 
-                } catch (errTargetReply) {
-                  console.error('Error generating target reply:', errTargetReply);
-                }
-              }, 1500);
+                    setTimeout(async () => {
+                      try {
+                        const reportBackMsg = `ഞാൻ ${target.display_name}-നോട് ചോദിച്ചിരുന്നു കേട്ടോ! അവർ പറഞ്ഞ മറുപടി ഇതാണ്:\n\n💬 "${targetReply}"\n\nകൂടുതൽ എന്തെങ്കിലും അറിയണമെന്നുണ്ടോ? ഞാൻ ചോദിച്ചു തരാം! 😊`;
+                        const savedReportMsg = await db.saveDirectMessage(recipientId, userId, reportBackMsg);
+                        io.to(`user_${userId}`).emit('new_direct_message', savedReportMsg);
+                      } catch (errReport) {
+                        console.error('Error sending report back to user:', errReport);
+                      }
+                    }, 1200);
+
+                  } catch (errTargetReply) {
+                    console.error('Error generating target reply:', errTargetReply);
+                  }
+                }, 1500);
+              } else {
+                // Target is a REAL HUMAN USER (like sabu)
+                pendingInquiries.set(`${target.id}_${recipientId}`, { originalUserId: userId, question: inquiry.question });
+
+                setTimeout(async () => {
+                  try {
+                    const reportRealUserMsg = `ഞാൻ ഇപ്പോൾ തന്നെ ${target.display_name}-ന് പേഴ്സണൽ മെസ്സേജ് അയച്ചു ചോദിച്ചിട്ടുണ്ട് കേട്ടോ! 📩\n\n${target.display_name} ഒരു റിയൽ യൂസർ (${target.profession}) ആയതിനാൽ, മെസ്സേജ് കണ്ട് റിപ്ലൈ തരുമ്പോൾ ഞാൻ ഉടൻ തന്നെ ആ വിവരങ്ങൾ താങ്കളെ അറിയിക്കാം. വേണമെങ്കിൽ താങ്കൾക്കും പ്രൊഫൈലിൽ നിന്നും നേരിട്ട് ${target.display_name}-ന് മെസ്സേജ് അയക്കാവുന്നതാണ്! 😊`;
+                    const savedReportMsg = await db.saveDirectMessage(recipientId, userId, reportRealUserMsg);
+                    io.to(`user_${userId}`).emit('new_direct_message', savedReportMsg);
+                  } catch (errReport) {
+                    console.error('Error reporting real user message:', errReport);
+                  }
+                }, 1200);
+              }
 
               return; // Stop here, inquiry handled
             }
 
-            // Normal 1-on-1 response if not a cross-inquiry
+            // Normal 1-on-1 response if not an inquiry
             const history = await db.getDirectMessagesBetween(userId, recipientId, 8);
             const botReply = await generateBotReply({
               botProfile: recipient,

@@ -51,7 +51,7 @@ Return ONLY a valid JSON object (no markdown, no extra text) with these exact ke
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'qwen/qwen3.8-27b',
+          model: 'openai/gpt-oss-20b',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.7,
           max_tokens: 300
@@ -121,30 +121,65 @@ CRITICAL RULES - FOLLOW STRICTLY:
 6. Formatting: Use clean bullet points or numbers for readability, like a friendly WhatsApp chat.`;
 }
 
-// Detect if user is asking this person/bot to contact or ask someone else
+// Detect if user is asking about someone or asking to contact someone
 async function detectInquiryIntent(userMessage) {
   const apiKey = process.env.GROQ_API_KEY;
   const msg = (userMessage || '').trim();
   if (!msg) return { is_inquiry: false };
 
-  // Fast check: common inquiry patterns in Malayalam / Manglish / English
-  const inquiryRegex = /(chodikk|chothikk|paranj|parayu|message ayakk|ask|tell|check with|contact|enth cheyyunnu|evideya|eppo)/i;
-  if (!inquiryRegex.test(msg) && !msg.toLowerCase().includes('ask')) {
-    return { is_inquiry: false };
+  const cleaned = msg.replace(/[?!.,]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // 1. Direct Regex Checks for "Do you know X" / "Did you know X" / "X-ne ariyumo"
+  const knowMatch1 = cleaned.match(/(?:did\s+you\s+know|do\s+you\s+know|know\s+about)\s+([A-Za-z0-9_]+)/i);
+  const knowMatch2 = cleaned.match(/^([A-Za-z0-9_]+)(?:-?ne|-?ine|-?e)?\s+(?:ariyumo|ariyo|know)/i);
+  const knowMatch3 = cleaned.match(/(?:ariyumo|ariyo)\s+([A-Za-z0-9_]+)/i);
+
+  if (knowMatch1 || knowMatch2 || knowMatch3) {
+    const target = (knowMatch1?.[1] || knowMatch2?.[1] || knowMatch3?.[1]).trim();
+    if (target && target.length > 1 && !['this', 'that', 'what', 'how', 'me', 'you'].includes(target.toLowerCase())) {
+      return {
+        is_inquiry: true,
+        type: 'check_knows',
+        target_name: target,
+        question: msg
+      };
+    }
   }
 
+  // 2. Direct Regex Checks for "X ippol enth cheyyunnu", "X enth cheyyunnu", "ask X", "X-nod chodikkamo"
+  const inquireMatch1 = cleaned.match(/^([A-Za-z0-9_]+)(?:-?nod|-?odu|-?node)?\s*(?:ippol|now)?\s*(?:enth|entha|enthanu)\s*(?:cheyyunnu|cheyyunnath|doing)/i);
+  const inquireMatch2 = cleaned.match(/(?:ask|chodikk|chodikkamo|chodikko|chothikkamo|contact|message)\s+([A-Za-z0-9_]+)/i);
+  const inquireMatch3 = cleaned.match(/^([A-Za-z0-9_]+)(?:-?nod|-?odu|-?node)\s*(?:onnu\s*)?(?:chodikk|chodikkamo|chodikko|chothikk)/i);
+  const inquireMatch4 = cleaned.match(/^([A-Za-z0-9_]+)\s+(?:evide|eppo|aano|enth)/i);
+
+  if (inquireMatch1 || inquireMatch2 || inquireMatch3 || inquireMatch4) {
+    const target = (inquireMatch1?.[1] || inquireMatch2?.[1] || inquireMatch3?.[1] || inquireMatch4?.[1]).trim();
+    if (target && target.length > 1 && !['this', 'that', 'what', 'how', 'me', 'you'].includes(target.toLowerCase())) {
+      return {
+        is_inquiry: true,
+        type: 'inquire_ask',
+        target_name: target,
+        question: msg
+      };
+    }
+  }
+
+  // 3. Fallback to Groq AI LLM parsing using openai/gpt-oss-20b
   if (apiKey) {
     try {
-      const prompt = `Analyze this chat message in a Malayalam/English networking app.
-Determine if the user is asking the speaker to contact, message, ask, or find out something from another specific person or professional (e.g. "Ramesh enth cheyyunnu enn onnu chodikkamo", "Dr. Arun-നോട് ചോദിക്കാമോ", "Can you ask Priya about her project?").
+      const prompt = `Analyze this chat message: "${msg}"
+The user might be talking to an assistant in a social networking app.
+Determine:
+1. Is user asking if the assistant knows another person? (e.g. "did you know sabu", "do you know Priya", "sabu-ne ariyumo") -> type: "check_knows"
+2. Is user asking the assistant to contact, ask, check on someone, or asking what someone is doing? (e.g. "sabu ippol enth cheyyunnu", "ask Rahul", "Priya-yodu chodikkamo") -> type: "inquire_ask"
+3. Neither (general chat or not about a 3rd person) -> is_inquiry: false
 
-User Message: "${msg}"
-
-Return ONLY a JSON object (no markdown, no quotes, no extra text):
+Return ONLY JSON:
 {
   "is_inquiry": true or false,
-  "target_name": "clean name or professional title of the person to contact (e.g. Ramesh, Dr. Arun, Priya), or empty string if false",
-  "question": "what the user wants to ask or find out from that person (in natural Malayalam or English)"
+  "type": "check_knows" or "inquire_ask",
+  "target_name": "clean name of person (e.g. Sabu, Priya, Rahul), or empty",
+  "question": "summary of question"
 }`;
 
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -154,9 +189,9 @@ Return ONLY a JSON object (no markdown, no quotes, no extra text):
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'qwen/qwen3.8-27b',
+          model: 'openai/gpt-oss-20b',
           messages: [{ role: 'user', content: prompt }],
-          temperature: 0.2,
+          temperature: 0.1,
           max_tokens: 150
         })
       });
@@ -169,24 +204,15 @@ Return ONLY a JSON object (no markdown, no quotes, no extra text):
         if (parsed && parsed.is_inquiry && parsed.target_name) {
           return {
             is_inquiry: true,
+            type: parsed.type || 'inquire_ask',
             target_name: parsed.target_name.trim(),
             question: (parsed.question || msg).trim()
           };
         }
       }
     } catch (e) {
-      console.warn('Inquiry intent detection parse issue:', e.message);
+      // ignore
     }
-  }
-
-  // Regex fallback: e.g. "Ramesh enth cheyyunnu" or "ask Ramesh"
-  const askMatch = msg.match(/(?:ask|chodikk|chothikk)\s+([A-Za-z]+)/i) || msg.match(/^([A-Za-z]+)\s+(?:enth|evide|eppo|aano)/i);
-  if (askMatch && askMatch[1] && askMatch[1].length > 2) {
-    return {
-      is_inquiry: true,
-      target_name: askMatch[1],
-      question: msg
-    };
   }
 
   return { is_inquiry: false };
@@ -222,7 +248,7 @@ async function generateBotReply({
         content: userMessage
       });
 
-      const modelsToTry = ['qwen/qwen3.8-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+      const modelsToTry = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
 
       for (const model of modelsToTry) {
         try {
