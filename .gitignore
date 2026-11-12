@@ -1,0 +1,7 @@
+node_modules/
+prochat.db
+prochat.db-shm
+prochat.db-wal
+.env
+.DS_Store
+*.log

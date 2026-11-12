@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ProChat - Professional Open World & Direct Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Socket.IO Client -->
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <div id="app" class="app-root">
+
+    <!-- TOP HEADER -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="logo">
+          <span class="logo-icon">🌐</span>
+          <div class="logo-text">
+            <span class="brand-title">ProChat</span>
+            <span class="brand-subtitle">Professional Network</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-search">
+        <div class="search-box">
+          <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="globalSearchInput" placeholder="Search professionals by job title, skills, or name (e.g. Doctor, DevOps)...">
+          <button id="clearSearchBtn" class="clear-btn hidden">&times;</button>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <div id="userProfileHeader" class="user-header-profile hidden">
+          <div class="user-avatar" id="headerAvatar">A</div>
+          <div class="user-info">
+            <div class="user-display-name" id="headerDisplayName">Azhar</div>
+            <div class="user-role-badge" id="headerProfession">Software Engineer</div>
+          </div>
+          <button id="logoutBtn" class="btn btn-outline btn-sm" title="Log Out">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <polyline points="16 17 21 12 16 7"></polyline>
+              <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+            <span>Logout</span>
+          </button>
+        </div>
+        <div id="guestHeaderActions" class="guest-actions">
+          <button id="openAuthModalBtn" class="btn btn-primary">Sign In / Register</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN APP LAYOUT -->
+    <div class="app-body">
+      <!-- SIDEBAR -->
+      <aside class="sidebar">
+        <!-- Navigation Buttons -->
+        <div class="sidebar-nav">
+          <button class="nav-item active" id="navWorldChat" data-view="world">
+            <span class="nav-icon">🌍</span>
+            <span class="nav-label">World Chat Box</span>
+            <span class="live-pill" title="Live Global Feed">Live</span>
+          </button>
+          <button class="nav-item" id="navDiscover" data-view="discover">
+            <span class="nav-icon">🔍</span>
+            <span class="nav-label">Find by Profession</span>
+          </button>
+        </div>
+
+        <div class="sidebar-divider"></div>
+
+        <!-- Direct Conversations Section -->
+        <div class="direct-section-header">
+          <span class="section-title">Direct Messages</span>
+          <span class="conversation-count" id="conversationCount">0</span>
+        </div>
+
+        <div class="conversations-list" id="conversationsList">
+          <div class="empty-state-small">No direct conversations yet. Search professionals to start a chat!</div>
+        </div>
+      </aside>
+
+      <!-- MAIN CONTENT STAGE -->
+      <main class="chat-stage" id="chatStage">
+
+        <!-- VIEW 1: WORLD CHAT -->
+        <section id="worldChatView" class="view-panel active">
+          <div class="panel-header">
+            <div class="panel-header-info">
+              <div class="panel-title-row">
+                <span class="panel-icon">🌍</span>
+                <h2 class="panel-title">World Chat Box</h2>
+                <span class="online-indicator-pill"><span class="dot"></span> <span id="onlineCountText">0 Online</span></span>
+              </div>
+              <p class="panel-description">Open global forum for professionals to network, exchange ideas, and share knowledge.</p>
+            </div>
+          </div>
+
+          <div class="messages-container" id="worldMessagesList">
+            <div class="loading-spinner">Loading messages...</div>
+          </div>
+
+          <div class="chat-input-container">
+            <form id="worldMessageForm" class="message-form">
+              <div class="input-wrapper">
+                <input type="text" id="worldMessageInput" placeholder="Share knowledge with the world (Text messages only)..." maxlength="1500" autocomplete="off">
+              </div>
+              <button type="submit" class="btn btn-primary send-btn" id="worldSendBtn">
+                <span>Send</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </form>
+          </div>
+        </section>
+
+        <!-- VIEW 2: DIRECT 1-ON-1 CHAT -->
+        <section id="directChatView" class="view-panel">
+          <div class="panel-header direct-header">
+            <div class="direct-recipient-info">
+              <div class="avatar" id="directRecipientAvatar">U</div>
+              <div>
+                <div class="recipient-name-row">
+                  <h2 class="panel-title" id="directRecipientName">User Name</h2>
+                  <span class="user-role-badge" id="directRecipientProfession">Profession</span>
+                </div>
+                <div class="recipient-status-row">
+                  <span class="status-indicator" id="directRecipientStatus"><span class="dot"></span> Offline</span>
+                  <span class="separator">•</span>
+                  <span class="recipient-skills" id="directRecipientSkills">Skills</span>
+                </div>
+              </div>
+            </div>
+            <div class="direct-header-actions">
+              <button class="btn btn-outline btn-sm" id="viewRecipientBioBtn">View Profile</button>
+            </div>
+          </div>
+
+          <div class="messages-container" id="directMessagesList">
+            <div class="loading-spinner">Loading conversation...</div>
+          </div>
+
+          <div class="chat-input-container">
+            <form id="directMessageForm" class="message-form">
+              <div class="input-wrapper">
+                <input type="text" id="directMessageInput" placeholder="Send private message..." maxlength="1500" autocomplete="off">
+              </div>
+              <button type="submit" class="btn btn-primary send-btn" id="directSendBtn">
+                <span>Send</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </form>
+          </div>
+        </section>
+
+        <!-- VIEW 3: DISCOVER PROFESSIONALS / SEARCH DIRECTORY -->
+        <section id="discoverView" class="view-panel">
+          <div class="panel-header">
+            <div class="panel-header-info">
+              <div class="panel-title-row">
+                <span class="panel-icon">🔍</span>
+                <h2 class="panel-title">Profession Directory</h2>
+              </div>
+              <p class="panel-description">Search and connect with specialists across engineering, healthcare, finance, design, science, and more.</p>
+            </div>
+            <div class="quick-tags" id="popularProfessionTags">
+              <span class="filter-chip active" data-filter="">All</span>
+              <span class="filter-chip" data-filter="Engineer">Engineer</span>
+              <span class="filter-chip" data-filter="Developer">Developer</span>
+              <span class="filter-chip" data-filter="Designer">Designer</span>
+              <span class="filter-chip" data-filter="Doctor">Doctor</span>
+              <span class="filter-chip" data-filter="Scientist">Scientist</span>
+              <span class="filter-chip" data-filter="Manager">Manager</span>
+            </div>
+          </div>
+
+          <div class="directory-container" id="professionDirectoryList">
+            <div class="loading-spinner">Searching professionals...</div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+    <!-- MODAL: AUTH (LOGIN & REGISTER) -->
+    <div class="modal-overlay hidden" id="authModal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="auth-tabs">
+            <button class="tab-btn active" id="tabSignIn">Sign In</button>
+            <button class="tab-btn" id="tabRegister">Create Account</button>
+          </div>
+        </div>
+
+        <div class="modal-body">
+          <div id="authAlert" class="alert-box hidden"></div>
+
+          <!-- SIGN IN FORM -->
+          <form id="signInForm" class="auth-form">
+            <div class="form-group">
+              <label for="loginUsername">Username</label>
+              <input type="text" id="loginUsername" placeholder="e.g. john_doe" required autocomplete="username">
+            </div>
+            <div class="form-group">
+              <label for="loginPassword">Password</label>
+              <input type="password" id="loginPassword" placeholder="••••••••" required autocomplete="current-password">
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">Sign In</button>
+          </form>
+
+          <!-- REGISTER FORM -->
+          <form id="registerForm" class="auth-form hidden">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="regFullName">Full Name *</label>
+                <input type="text" id="regFullName" placeholder="e.g. Azhar Ahmed" required>
+              </div>
+              <div class="form-group">
+                <label for="regUsername">Username *</label>
+                <input type="text" id="regUsername" placeholder="e.g. azhar_dev" required autocomplete="username">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="regProfession">Professional Role / Knowledge *</label>
+              <input type="text" id="regProfession" placeholder="e.g. Full-Stack Engineer, AI Specialist, Medical Doctor" required>
+              <span class="form-hint">This will be your badge visible in the World Chat and Directory.</span>
+            </div>
+
+            <div class="form-group">
+              <label for="regSkills">Key Skills / Domain Knowledge</label>
+              <input type="text" id="regSkills" placeholder="e.g. JavaScript, Python, Distributed Systems, Cloud">
+            </div>
+
+            <div class="form-group">
+              <label for="regBio">Professional Bio</label>
+              <textarea id="regBio" rows="2" placeholder="Briefly describe your background, expertise, or what you enjoy discussing..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="regPassword">Password *</label>
+              <input type="password" id="regPassword" placeholder="Minimum 6 characters" required autocomplete="new-password">
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block">Create Professional Account</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: USER BIO DETAILS -->
+    <div class="modal-overlay hidden" id="userBioModal">
+      <div class="modal-card modal-sm">
+        <div class="bio-modal-header">
+          <div class="avatar avatar-lg" id="bioModalAvatar">U</div>
+          <h3 id="bioModalName">User Name</h3>
+          <div class="user-role-badge" id="bioModalProfession">Profession</div>
+        </div>
+        <div class="bio-modal-body">
+          <div class="bio-item">
+            <span class="bio-label">Skills & Knowledge</span>
+            <div class="skills-chips" id="bioModalSkills"></div>
+          </div>
+          <div class="bio-item">
+            <span class="bio-label">About</span>
+            <p id="bioModalAbout" class="bio-text">No bio provided.</p>
+          </div>
+          <div class="bio-modal-actions">
+            <button class="btn btn-primary btn-block" id="bioModalChatBtn">Open Personal Chat</button>
+            <button class="btn btn-secondary btn-block" id="closeBioModalBtn">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/socket.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
+
