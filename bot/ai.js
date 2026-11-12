@@ -1,5 +1,5 @@
 // Professional AI Bot Engine for ProChat
-// Incorporates the exact Malayalam professional persona configured for ProChat
+// Powered by Groq Ultra-Fast LPU Inference with Malayalam Persona
 
 const BOT_USER = {
   username: 'probot',
@@ -7,73 +7,82 @@ const BOT_USER = {
   display_name: 'ProBot AI',
   profession: 'AI Consultant & Knowledge Assistant',
   skills: 'Malayalam, Technology, Career Guidance, Engineering, Problem Solving',
-  bio: '24/7 AI Professional Assistant. Message me directly with any question in Malayalam, Manglish, or English!'
+  bio: '24/7 AI Professional Assistant powered by Groq. Message me directly in Malayalam, Manglish, or English!'
 };
 
 function buildSystemInstruction(userName, userProfession) {
-  return `You are "ProBot AI" (@probot), a professional AI Consultant and specialist assistant in the ProChat professional network from Kerala, India.
+  return `You are "ProBot AI" (@probot), a professional AI Consultant and specialist in the ProChat professional network from Kerala, India.
 User chatting with you: ${userName} (${userProfession || 'Professional'}).
 
-RULES - follow strictly:
-1. ALWAYS reply in natural Malayalam language (Malayalam script). The user may write in Malayalam, Manglish, or English, but YOU reply in Malayalam. Keep English technical terms in English inside Malayalam sentences.
+RULES - FOLLOW STRICTLY:
+1. ALWAYS reply in natural Malayalam language (Malayalam script). The user may write in Malayalam, Manglish, or English, but YOU reply in Malayalam. Keep English technical terms in English inside Malayalam sentences (e.g. "Python ഇൻസ്റ്റാൾ ചെയ്യുക", "API കണക്ട് ചെയ്യുക").
 2. Act fully as a professional consultant. Give practical, correct, clear, and helpful answers with steps or examples where useful.
-3. Use a polite, natural conversational Kerala Malayalam tone (friendly and professional).
-4. Keep answers concise: 3-8 sentences max unless the user asks for deep detail.
-5. You are ProBot AI, the native AI Consultant of ProChat. Never refer to yourself as ChatGPT.`;
+3. Use a polite, natural conversational Kerala Malayalam tone (friendly, respectful, and professional).
+4. Keep answers concise: 3-8 sentences or short bullet points max so it fits naturally in chat.
+5. You are ProBot AI, the native AI Consultant of ProChat. Never say you are ChatGPT or OpenAI.`;
 }
 
 async function generateBotReply({ userMessage, userName = 'User', userProfession = 'Professional', conversationHistory = [] }) {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.AI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
 
   if (apiKey) {
     try {
       const systemPrompt = buildSystemInstruction(userName, userProfession);
-      
-      const contents = [];
+
+      const messages = [
+        { role: 'system', content: systemPrompt }
+      ];
+
       // Add recent history if available
       for (const m of conversationHistory.slice(-6)) {
-        contents.push({
-          role: m.sender_username === 'probot' ? 'model' : 'user',
-          parts: [{ text: m.content }]
+        messages.push({
+          role: m.sender_username === 'probot' ? 'assistant' : 'user',
+          content: m.content
         });
       }
+
       // Add current message
-      contents.push({
+      messages.push({
         role: 'user',
-        parts: [{ text: userMessage }]
+        content: userMessage
       });
 
-      // Call Gemini 2.5 Flash / 1.5 Flash
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: {
-            parts: [{ text: systemPrompt }]
-          },
-          contents,
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 800
+      // Try Groq models (qwen3.8-27b or openai/gpt-oss-120b)
+      const modelsToTry = ['qwen/qwen3.8-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+
+      for (const model of modelsToTry) {
+        try {
+          const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model,
+              messages,
+              temperature: 0.6,
+              max_tokens: 600
+            })
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            const text = data.choices?.[0]?.message?.content;
+            if (text && text.trim()) {
+              return text.trim();
+            }
           }
-        })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (replyText && replyText.trim()) {
-          return replyText.trim();
+        } catch (innerErr) {
+          console.warn(`Groq model ${model} failed, trying next...`);
         }
       }
-      console.warn('Gemini API returned unexpected structure, falling back to smart reply');
     } catch (err) {
-      console.error('Error calling AI API:', err.message);
+      console.error('Error calling Groq API:', err.message);
     }
   }
 
-  // Fallback smart replies in Malayalam when API key is not configured yet
+  // Fallback smart replies in Malayalam
   return generateFallbackReply(userMessage, userName);
 }
 
@@ -84,15 +93,7 @@ function generateFallbackReply(text, userName) {
     return `നമസ്കാരം ${userName}! 🙏 ഞാൻ ProBot AI ആണ് — ProChat-ലെ പ്രൊഫഷണൽ AI അസിസ്റ്റന്റ്. എന്ത് സംശയമുണ്ടെങ്കിലും ചോദിക്കൂ, സഹായിക്കാൻ സന്തോഷമേയുള്ളൂ!`;
   }
 
-  if (q.includes('job') || q.includes('career') || q.includes('ജോലി')) {
-    return `കരിയർ അല്ലെങ്കിൽ ജോലി സംബന്ധമായ ഏത് കാര്യത്തിലും സഹായിക്കാം! നിങ്ങളുടെ താൽപ്പര്യമുള്ള ഫീൽഡ് (ഉദാ: IT, Software, Healthcare, Design) ഏതാണെന്ന് പറഞ്ഞാൽ കൃത്യമായ റോഡ്മാപ്പും സ്കില്ലുകളും പറഞ്ഞുതരാം.`;
-  }
-
-  if (q.includes('python') || q.includes('javascript') || q.includes('coding') || q.includes('കോഡിങ്')) {
-    return `കോഡിങ് പഠിക്കാൻ ഏറ്റവും നല്ലത് ചെറിയ പ്രോജക്റ്റുകൾ ചെയ്തു തുടങ്ങുന്നതാണ്! ബേസിക്സ് പഠിച്ച ശേഷം ദിവസവും പ്രോഗ്രാമിങ് പ്രാക്ടീസ് ചെയ്യുക. എന്തെങ്കിലും സ്പെസിഫിക് പ്രോഗ്രാം അല്ലെങ്കിൽ എറർ സോൾവ് ചെയ്യണമെന്നുണ്ടെങ്കിൽ ചോദിക്കൂ!`;
-  }
-
-  return `തീർച്ചയായും! "${text}" എന്നതിനെക്കുറിച്ച് ഞാൻ പഠിച്ചു കഴിഞ്ഞു. കൂടുതൽ വ്യക്തമായി അറിയാൻ നിങ്ങളുടെ സ്പെസിഫിക് സംശയം ചോദിക്കൂ. ഞാൻ സഹായിക്കാം! 👍 (Render/Environment-ൽ GEMINI_API_KEY ചേർത്താൽ ഫുൾ ലൈവ് AI മറുപടികൾ ലഭിക്കും).`;
+  return `തീർച്ചയായും! ${userName}, നിങ്ങളുടെ ചോദ്യത്തിന് മറുപടി നൽകാൻ ഞാൻ ഇവിടെയുണ്ട്. എന്ത് സംശയമുണ്ടെങ്കിലും വ്യക്തമായി ചോദിക്കൂ, സഹായിക്കാം! 👍`;
 }
 
 module.exports = {
