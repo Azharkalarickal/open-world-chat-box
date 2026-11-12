@@ -1,12 +1,12 @@
 // Professional AI Bot Engine for ProChat
-// Powered by Groq Ultra-Fast LPU Inference with Malayalam Persona & Dynamic Specialist Generation
+// Powered by Groq Ultra-Fast LPU Inference with Friendly Malayalam Persona & Dynamic Specialist Generation
 
 const BOT_USER = {
   username: 'probot',
   password: 'probot_secure_system_password_2026',
   display_name: 'ProBot AI',
   profession: 'AI Consultant & Knowledge Assistant',
-  skills: 'Malayalam, Technology, Career Guidance, Engineering, Problem Solving',
+  skills: 'Malayalam, Technology, Business, Career Guidance, Problem Solving',
   bio: '24/7 AI Professional Assistant powered by Groq. Message me directly in Malayalam, Manglish, or English!'
 };
 
@@ -20,7 +20,6 @@ const KERALA_LAST_NAMES = [
   'Mathew', 'Varghese', 'Ahmed', 'Ali', 'Ibrahim', 'Panicker', 'Rao'
 ];
 
-// Helper to generate a unique realistic username
 function makeUsername(name, profession) {
   const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, '_');
   const cleanProf = profession.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
@@ -40,9 +39,9 @@ Generate a realistic, professional human profile for someone who is a "${target}
 Return ONLY a valid JSON object (no markdown, no extra text) with these exact keys:
 {
   "display_name": "Full Name (e.g. Dr. Anand Varma, Adv. Priya Menon, Arjun Nair, etc. include Dr. or Adv. only if doctor or lawyer)",
-  "profession": "Accurate Professional Title (e.g. Senior Cardiologist, High Court Advocate, DevOps Engineer, etc.)",
+  "profession": "Accurate Professional Title (e.g. Senior Business Consultant, Cardiologist, High Court Advocate, etc.)",
   "skills": "4-5 comma separated key domain skills",
-  "bio": "2 sentence professional background from Kerala, ready to consult and answer questions."
+  "bio": "Warm, encouraging 2-sentence background from Kerala, enthusiastic to guide and mentor people."
 }`;
 
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -72,7 +71,7 @@ Return ONLY a valid JSON object (no markdown, no extra text) with these exact ke
             password: 'password', // will hash with 123456
             profession: parsed.profession.trim(),
             skills: (parsed.skills || target).trim(),
-            bio: (parsed.bio || `Specialist in ${target}. Ready to consult.`).trim() + ' [AI Professional]'
+            bio: (parsed.bio || `Specialist in ${target}. Always ready to guide and talk.`).trim() + ' [AI Professional]'
           };
         }
       }
@@ -100,25 +99,26 @@ Return ONLY a valid JSON object (no markdown, no extra text) with these exact ke
     username,
     password: 'password', // will hash with 123456
     profession: `${capitalizedProf} Specialist`,
-    skills: `${capitalizedProf}, Consulting, Strategy, Industry Knowledge`,
-    bio: `Professional ${capitalizedProf} from Kerala with extensive domain experience. Feel free to message me in personal chat! [AI Professional]`
+    skills: `${capitalizedProf}, Consulting, Strategy, Mentorship`,
+    bio: `Experienced ${capitalizedProf} from Kerala. Always happy to guide, talk, and explain in detail! [AI Professional]`
   };
 }
 
-// System prompt for specific persona in personal chat
+// Friendly system prompt with high readiness to explain and guide
 function buildPersonaPrompt(botProfile, userName, userProfession) {
-  return `You are "${botProfile.display_name}", a real human professional specialist in the ProChat professional network from Kerala, India.
-Your Professional Title: "${botProfile.profession}".
+  return `You are "${botProfile.display_name}", a real human professional specialist in the ProChat network from Kerala, India.
+Your Professional Role: "${botProfile.profession}".
 Your Key Skills: "${botProfile.skills || 'Domain Knowledge'}".
 Your Background: "${botProfile.bio}".
-User chatting with you: ${userName} (${userProfession || 'Professional'}).
+User chatting with you: ${userName} (${userProfession || 'Friend / Professional'}).
 
 CRITICAL RULES - FOLLOW STRICTLY:
-1. Act 100% authentically as a real human ${botProfile.profession}. NEVER say you are an AI, bot, language model, or created by OpenAI/Groq. You are ${botProfile.display_name} in person.
-2. ALWAYS reply in natural Malayalam language (Malayalam script). Technical words stay in English inside Malayalam sentences (e.g. "ECG നോക്കണം", "Documentation തയ്യാറാക്കുക").
-3. Use a polite, natural, professional conversational Kerala Malayalam tone (friendly, respectful, and authoritative in your field).
-4. Give practical, high-value, realistic answers based strictly on your domain of ${botProfile.profession}.
-5. Keep answers concise: 3-8 sentences or short bullet points max so it fits naturally in chat.`;
+1. Act 100% authentically as a real human ${botProfile.profession}. NEVER say you are an AI, bot, language model, robot, or from OpenAI/Groq. You are ${botProfile.display_name} in person.
+2. TONE IS EXTREMELY WARM, FRIENDLY, AND SUPPORTIVE (വളരെ ഫ്രണ്ട്‌ലിയായി, സ്നേഹത്തോടെയും കാര്യങ്ങൾ വിശദമായി പറഞ്ഞുതരാൻ എപ്പോഴും തയ്യാറുള്ള ഒരു ചേട്ടനെപ്പോലെയോ മെന്ററെപ്പോലെയോ സംസാരിക്കുക).
+3. ALWAYS reply in natural Malayalam language (Malayalam script). Technical terms and names stay in English inside Malayalam sentences (e.g. "GST രജിസ്ട്രേഷൻ", "Market Research", "Instagram Marketing").
+4. READINESS TO EXPLAIN MORE: Always be eager to explain in detail. Give practical, step-by-step guidance.
+5. END WITH A WARM INVITATION: Conclude your answers warmly inviting more questions or offering the next step (e.g., "ഇതിനെക്കുറിച്ച് കൂടുതൽ അറിയാൻ താല്പര്യമുണ്ടോ? ഞാൻ വിശദമായി പറഞ്ഞുതരാം കേട്ടോ! 😊", "ഇതിന്റെ അടുത്ത സ്റ്റെപ്പ് എന്താണെന്ന് പറഞ്ഞു തരട്ടെ?", "എന്ത് സംശയമുണ്ടെങ്കിലും ധൈര്യമായി ചോദിക്കൂ, ഞാൻ ഇവിടെയുണ്ട്!").
+6. Formatting: Use clean bullet points or numbers for readability, like a friendly WhatsApp chat.`;
 }
 
 // Generate response for any persona (ProBot or dynamic specialist)
@@ -164,8 +164,8 @@ async function generateBotReply({
             body: JSON.stringify({
               model,
               messages,
-              temperature: 0.65,
-              max_tokens: 600
+              temperature: 0.7,
+              max_tokens: 750
             })
           });
 
@@ -185,8 +185,8 @@ async function generateBotReply({
     }
   }
 
-  // Fallback response if API key is not yet reachable
-  return `നമസ്കാരം ${userName}! 🙏 ഞാൻ ${botProfile.display_name} ആണ് (${botProfile.profession}). നിങ്ങളുടെ ചോദ്യം എനിക്ക് ലഭിച്ചു. കൂടുതൽ വിശദാംശങ്ങൾ ചോദിക്കൂ, സഹായിക്കാം! 👍`;
+  // Friendly Fallback response
+  return `ഹലോ ${userName}! 😊 ഞാൻ ${botProfile.display_name} ആണ് (${botProfile.profession}). നിങ്ങളുടെ മെസ്സേജ് കണ്ടതിൽ വളരെ സന്തോഷം! ഇതിനെക്കുറിച്ച് കൂടുതൽ കാര്യങ്ങൾ ഞാൻ വിശദമായി പറഞ്ഞുതരാൻ തയ്യാറാണ്. നിങ്ങൾക്ക് കൃത്യമായി എന്താണ് അറിയേണ്ടത് എന്ന് ചോദിക്കൂ, ഞാൻ പറഞ്ഞുതരാം! 👍`;
 }
 
 module.exports = {

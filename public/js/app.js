@@ -25,6 +25,12 @@
     globalSearchInput: document.getElementById('globalSearchInput'),
     clearSearchBtn: document.getElementById('clearSearchBtn'),
 
+    // Layout & Mobile
+    appBody: document.querySelector('.app-body'),
+    worldMobileBackBtn: document.getElementById('worldMobileBackBtn'),
+    directMobileBackBtn: document.getElementById('directMobileBackBtn'),
+    discoverMobileBackBtn: document.getElementById('discoverMobileBackBtn'),
+
     // Sidebar
     navWorldChat: document.getElementById('navWorldChat'),
     navDiscover: document.getElementById('navDiscover'),
@@ -162,6 +168,11 @@
     elements.navDiscover.classList.remove('active');
     document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
 
+    // On mobile, show the chat stage
+    if (elements.appBody) {
+      elements.appBody.classList.add('mobile-viewing-chat');
+    }
+
     if (viewName === 'world') {
       elements.worldChatView.classList.add('active');
       elements.navWorldChat.classList.add('active');
@@ -177,6 +188,12 @@
       elements.discoverView.classList.add('active');
       elements.navDiscover.classList.add('active');
       loadProfessionDirectory('');
+    }
+  }
+
+  function closeMobileChat() {
+    if (elements.appBody) {
+      elements.appBody.classList.remove('mobile-viewing-chat');
     }
   }
 
@@ -205,16 +222,16 @@
     row.className = 'message-row';
 
     row.innerHTML = `
-      <div class="avatar message-avatar" style="background-color: ${msg.avatar_color || '#3b82f6'}" title="View profile">
+      <div class="avatar message-avatar" style="background-color: ${msg.avatar_color || '#00a884'}" title="View profile">
         ${initial}
       </div>
-      <div class="message-body">
+      <div class="message-bubble-wrapper">
         <div class="message-meta">
           <span class="message-sender">${escapeHtml(msg.display_name || msg.username)}</span>
-          <span class="user-role-badge">${escapeHtml(msg.profession || 'Professional')}</span>
-          <span class="message-time">${formatTime(msg.created_at)}</span>
+          <span class="user-role-badge">${escapeHtml(msg.profession || 'Specialist')}</span>
         </div>
         <div class="message-content">${escapeHtml(msg.content)}</div>
+        <div class="message-bottom-meta">${formatTime(msg.created_at)}</div>
       </div>
     `;
 
@@ -290,10 +307,12 @@
     row.className = `direct-message-row ${isOutgoing ? 'outgoing' : 'incoming'}`;
 
     row.innerHTML = `
-      <div class="direct-bubble">${escapeHtml(msg.content)}</div>
-      <div class="direct-meta">
-        <span>${formatTime(msg.created_at)}</span>
-        ${isOutgoing ? `<span style="margin-left:4px;">${msg.is_read ? '✓✓' : '✓'}</span>` : ''}
+      <div class="direct-bubble">
+        <span class="bubble-text">${escapeHtml(msg.content)}</span>
+        <div class="direct-meta">
+          <span>${formatTime(msg.created_at)}</span>
+          ${isOutgoing ? `<span class="wa-ticks">✓✓</span>` : ''}
+        </div>
       </div>
     `;
 
@@ -582,6 +601,11 @@
   // Navigation
   elements.navWorldChat.addEventListener('click', () => switchView('world'));
   elements.navDiscover.addEventListener('click', () => switchView('discover'));
+
+  // Mobile Back Button Listeners
+  if (elements.worldMobileBackBtn) elements.worldMobileBackBtn.addEventListener('click', closeMobileChat);
+  if (elements.directMobileBackBtn) elements.directMobileBackBtn.addEventListener('click', closeMobileChat);
+  if (elements.discoverMobileBackBtn) elements.discoverMobileBackBtn.addEventListener('click', closeMobileChat);
 
   // World Message Submit
   elements.worldMessageForm.addEventListener('submit', (e) => {

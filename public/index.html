@@ -95,13 +95,18 @@
         <!-- VIEW 1: WORLD CHAT -->
         <section id="worldChatView" class="view-panel active">
           <div class="panel-header">
+            <button class="mobile-back-btn" id="worldMobileBackBtn" title="Back to Chats">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
             <div class="panel-header-info">
               <div class="panel-title-row">
                 <span class="panel-icon">🌍</span>
                 <h2 class="panel-title">World Chat Box</h2>
                 <span class="online-indicator-pill"><span class="dot"></span> <span id="onlineCountText">0 Online</span></span>
               </div>
-              <p class="panel-description">Open global forum for professionals to network, exchange ideas, and share knowledge.</p>
+              <p class="panel-description">Open global forum for professionals. Type @find &lt;profession&gt; to summon any specialist.</p>
             </div>
           </div>
 
@@ -112,11 +117,10 @@
           <div class="chat-input-container">
             <form id="worldMessageForm" class="message-form">
               <div class="input-wrapper">
-                <input type="text" id="worldMessageInput" placeholder="Message everyone, or type @find <profession> (e.g. @find doctor, @find lawyer)..." maxlength="1500" autocomplete="off">
+                <input type="text" id="worldMessageInput" placeholder="Message or type @find <profession> (e.g. @find doctor)..." maxlength="1500" autocomplete="off">
               </div>
-              <button type="submit" class="btn btn-primary send-btn" id="worldSendBtn">
-                <span>Send</span>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <button type="submit" class="send-btn wa-send-btn" id="worldSendBtn" title="Send message">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                   <line x1="22" y1="2" x2="11" y2="13"></line>
                   <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                 </svg>
@@ -129,6 +133,11 @@
         <section id="directChatView" class="view-panel">
           <div class="panel-header direct-header">
             <div class="direct-recipient-info">
+              <button class="mobile-back-btn" id="directMobileBackBtn" title="Back to Chats">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="15 18 9 12 15 6"></polyline>
+                </svg>
+              </button>
               <div class="avatar" id="directRecipientAvatar">U</div>
               <div>
                 <div class="recipient-name-row">
@@ -154,11 +163,10 @@
           <div class="chat-input-container">
             <form id="directMessageForm" class="message-form">
               <div class="input-wrapper">
-                <input type="text" id="directMessageInput" placeholder="Send private message..." maxlength="1500" autocomplete="off">
+                <input type="text" id="directMessageInput" placeholder="Type a message..." maxlength="1500" autocomplete="off">
               </div>
-              <button type="submit" class="btn btn-primary send-btn" id="directSendBtn">
-                <span>Send</span>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <button type="submit" class="send-btn wa-send-btn" id="directSendBtn" title="Send message">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                   <line x1="22" y1="2" x2="11" y2="13"></line>
                   <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                 </svg>
@@ -170,6 +178,11 @@
         <!-- VIEW 3: DISCOVER PROFESSIONALS / SEARCH DIRECTORY -->
         <section id="discoverView" class="view-panel">
           <div class="panel-header">
+            <button class="mobile-back-btn" id="discoverMobileBackBtn" title="Back to Chats">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
             <div class="panel-header-info">
               <div class="panel-title-row">
                 <span class="panel-icon">🔍</span>
