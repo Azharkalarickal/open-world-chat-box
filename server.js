@@ -11,16 +11,7 @@ const { BOT_USER, generateBotReply } = require('./bot/ai');
 const JWT_SECRET = process.env.JWT_SECRET || 'prochat-secret-key-2026-secure';
 const PORT = process.env.PORT || 3000;
 
-// Initialize database
-db.initDb();
-
-// Ensure system AI bot user exists
-let botUser = db.getUserByUsername(BOT_USER.username);
-if (!botUser) {
-  botUser = db.createUser(BOT_USER);
-  console.log(`🤖 Initialized ProBot AI with ID: ${botUser.id}`);
-}
-const BOT_USER_ID = botUser.id;
+let BOT_USER_ID = null;
 
 const app = express();
 const server = http.createServer(app);
@@ -50,23 +41,27 @@ function authenticateToken(req, res, next) {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+  jwt.verify(token, JWT_SECRET, async (err, decoded) => {
     if (err) {
       return res.status(403).json({ error: 'Invalid or expired session' });
     }
-    const user = db.getUserById(decoded.id);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+    try {
+      const user = await db.getUserById(decoded.id);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      req.user = user;
+      next();
+    } catch (e) {
+      return res.status(500).json({ error: 'Authentication check failed' });
     }
-    req.user = user;
-    next();
   });
 }
 
 // ---------------- REST API ROUTES ----------------
 
 // Register
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   try {
     const { username, password, display_name, profession, skills, bio } = req.body;
 
@@ -84,12 +79,12 @@ app.post('/api/auth/register', (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
     }
 
-    const existing = db.getUserByUsername(username);
+    const existing = await db.getUserByUsername(username);
     if (existing) {
       return res.status(409).json({ error: 'Username is already taken. Please choose another.' });
     }
 
-    const newUser = db.createUser({
+    const newUser = await db.createUser({
       username,
       password,
       display_name,
@@ -116,14 +111,14 @@ app.post('/api/auth/register', (req, res) => {
 });
 
 // Login
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password are required.' });
     }
 
-    const user = db.getUserByUsername(username);
+    const user = await db.getUserByUsername(username);
     if (!user || !db.verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ error: 'Invalid username or password.' });
     }
@@ -138,7 +133,7 @@ app.post('/api/auth/login', (req, res) => {
       sameSite: 'lax'
     });
 
-    const safeUser = db.getUserById(user.id);
+    const safeUser = await db.getUserById(user.id);
     res.json({ user: safeUser, token });
   } catch (error) {
     console.error('Login error:', error);
@@ -158,10 +153,10 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // Search Users (filter by profession, name, skills)
-app.get('/api/users/search', authenticateToken, (req, res) => {
+app.get('/api/users/search', authenticateToken, async (req, res) => {
   try {
     const query = req.query.q || '';
-    const users = db.searchUsers({ query, excludeUserId: req.user.id });
+    const users = await db.searchUsers({ query, excludeUserId: req.user.id });
     res.json({ users });
   } catch (error) {
     console.error('User search error:', error);
@@ -170,9 +165,9 @@ app.get('/api/users/search', authenticateToken, (req, res) => {
 });
 
 // Fetch Single User Details
-app.get('/api/users/:id', authenticateToken, (req, res) => {
+app.get('/api/users/:id', authenticateToken, async (req, res) => {
   try {
-    const target = db.getUserById(parseInt(req.params.id, 10));
+    const target = await db.getUserById(parseInt(req.params.id, 10));
     if (!target) return res.status(404).json({ error: 'User not found.' });
     res.json({ user: target });
   } catch (error) {
@@ -181,9 +176,9 @@ app.get('/api/users/:id', authenticateToken, (req, res) => {
 });
 
 // World Chat Message History
-app.get('/api/messages/world', authenticateToken, (req, res) => {
+app.get('/api/messages/world', authenticateToken, async (req, res) => {
   try {
-    const messages = db.getRecentWorldMessages(100);
+    const messages = await db.getRecentWorldMessages(100);
     res.json({ messages });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch world messages.' });
@@ -191,11 +186,11 @@ app.get('/api/messages/world', authenticateToken, (req, res) => {
 });
 
 // Direct Chat Message History between current user and target user
-app.get('/api/messages/direct/:userId', authenticateToken, (req, res) => {
+app.get('/api/messages/direct/:userId', authenticateToken, async (req, res) => {
   try {
     const otherUserId = parseInt(req.params.userId, 10);
-    db.markDirectMessagesRead(req.user.id, otherUserId);
-    const messages = db.getDirectMessagesBetween(req.user.id, otherUserId, 150);
+    await db.markDirectMessagesRead(req.user.id, otherUserId);
+    const messages = await db.getDirectMessagesBetween(req.user.id, otherUserId, 150);
     res.json({ messages });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch direct messages.' });
@@ -203,9 +198,9 @@ app.get('/api/messages/direct/:userId', authenticateToken, (req, res) => {
 });
 
 // User Direct Conversations List (with unread counters)
-app.get('/api/conversations', authenticateToken, (req, res) => {
+app.get('/api/conversations', authenticateToken, async (req, res) => {
   try {
-    const conversations = db.getRecentDirectConversations(req.user.id);
+    const conversations = await db.getRecentDirectConversations(req.user.id);
     res.json({ conversations });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch conversations.' });
@@ -217,6 +212,15 @@ app.get('/api/conversations', authenticateToken, (req, res) => {
 // Map of userId -> Set of socketIds
 const onlineUsers = new Map();
 
+// Helper to broadcast presence including 24/7 AI Bot
+function broadcastPresence() {
+  const ids = Array.from(onlineUsers.keys());
+  if (BOT_USER_ID && !ids.includes(BOT_USER_ID)) {
+    ids.push(BOT_USER_ID);
+  }
+  io.emit('presence_update', { onlineUserIds: ids });
+}
+
 // Socket authentication middleware
 io.use((socket, next) => {
   const token = socket.handshake.auth.token || 
@@ -226,23 +230,18 @@ io.use((socket, next) => {
     return next(new Error('Authentication token required'));
   }
 
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+  jwt.verify(token, JWT_SECRET, async (err, decoded) => {
     if (err) return next(new Error('Invalid token'));
-    const user = db.getUserById(decoded.id);
-    if (!user) return next(new Error('User not found'));
-    socket.user = user;
-    next();
+    try {
+      const user = await db.getUserById(decoded.id);
+      if (!user) return next(new Error('User not found'));
+      socket.user = user;
+      next();
+    } catch (e) {
+      next(e);
+    }
   });
 });
-
-// Helper to broadcast presence including 24/7 AI Bot
-function broadcastPresence() {
-  const ids = Array.from(onlineUsers.keys());
-  if (!ids.includes(BOT_USER_ID)) {
-    ids.push(BOT_USER_ID);
-  }
-  io.emit('presence_update', { onlineUserIds: ids });
-}
 
 io.on('connection', (socket) => {
   const user = socket.user;
@@ -263,12 +262,12 @@ io.on('connection', (socket) => {
   broadcastPresence();
 
   // Handle World Message
-  socket.on('send_world_message', (data) => {
+  socket.on('send_world_message', async (data) => {
     try {
       const content = (data?.content || '').trim();
       if (!content) return;
 
-      const savedMessage = db.saveWorldMessage(userId, content);
+      const savedMessage = await db.saveWorldMessage(userId, content);
       io.to('world_chat').emit('new_world_message', savedMessage);
 
       // If user tags @probot in World Chat
@@ -281,7 +280,7 @@ io.on('connection', (socket) => {
               userName: user.display_name,
               userProfession: user.profession
             });
-            const savedBotWorldMsg = db.saveWorldMessage(BOT_USER_ID, `@${user.display_name} ${botReply}`);
+            const savedBotWorldMsg = await db.saveWorldMessage(BOT_USER_ID, `@${user.display_name} ${botReply}`);
             io.to('world_chat').emit('new_world_message', savedBotWorldMsg);
           } catch (e) {
             console.error('ProBot world chat reply error:', e);
@@ -295,7 +294,7 @@ io.on('connection', (socket) => {
   });
 
   // Handle Direct 1-on-1 Message
-  socket.on('send_direct_message', (data) => {
+  socket.on('send_direct_message', async (data) => {
     try {
       const recipientId = parseInt(data?.recipientId, 10);
       const content = (data?.content || '').trim();
@@ -305,12 +304,12 @@ io.on('connection', (socket) => {
         return socket.emit('error_message', { message: 'Cannot send message to yourself.' });
       }
 
-      const recipient = db.getUserById(recipientId);
+      const recipient = await db.getUserById(recipientId);
       if (!recipient) {
         return socket.emit('error_message', { message: 'Recipient does not exist.' });
       }
 
-      const savedMessage = db.saveDirectMessage(userId, recipientId, content);
+      const savedMessage = await db.saveDirectMessage(userId, recipientId, content);
 
       // Emit to recipient's room
       io.to(`user_${recipientId}`).emit('new_direct_message', savedMessage);
@@ -322,7 +321,7 @@ io.on('connection', (socket) => {
       if (recipientId === BOT_USER_ID) {
         setTimeout(async () => {
           try {
-            const history = db.getDirectMessagesBetween(userId, BOT_USER_ID, 8);
+            const history = await db.getDirectMessagesBetween(userId, BOT_USER_ID, 8);
             const botReply = await generateBotReply({
               userMessage: content,
               userName: user.display_name,
@@ -330,7 +329,7 @@ io.on('connection', (socket) => {
               conversationHistory: history
             });
 
-            const savedBotMsg = db.saveDirectMessage(BOT_USER_ID, userId, botReply);
+            const savedBotMsg = await db.saveDirectMessage(BOT_USER_ID, userId, botReply);
             io.to(`user_${userId}`).emit('new_direct_message', savedBotMsg);
           } catch (e) {
             console.error('ProBot direct reply error:', e);
@@ -344,11 +343,11 @@ io.on('connection', (socket) => {
   });
 
   // Handle Mark As Read
-  socket.on('mark_read', (data) => {
+  socket.on('mark_read', async (data) => {
     try {
       const senderId = parseInt(data?.senderId, 10);
       if (senderId) {
-        db.markDirectMessagesRead(userId, senderId);
+        await db.markDirectMessagesRead(userId, senderId);
         // Inform the sender that their messages have been read
         io.to(`user_${senderId}`).emit('messages_read', { readByUserId: userId });
       }
@@ -371,9 +370,28 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`=================================================`);
-  console.log(`🚀 ProChat Server is running on port ${PORT}`);
-  console.log(`=================================================`);
-});
+// Server Initialization
+async function startServer() {
+  try {
+    await db.initDb();
 
+    // Ensure system AI bot user exists
+    let botUser = await db.getUserByUsername(BOT_USER.username);
+    if (!botUser) {
+      botUser = await db.createUser(BOT_USER);
+      console.log(`🤖 Initialized ProBot AI with ID: ${botUser.id}`);
+    }
+    BOT_USER_ID = botUser.id;
+
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`=================================================`);
+      console.log(`🚀 ProChat Server is running on port ${PORT}`);
+      console.log(`=================================================`);
+    });
+  } catch (err) {
+    console.error('Failed to start ProChat server:', err);
+    process.exit(1);
+  }
+}
+
+startServer();

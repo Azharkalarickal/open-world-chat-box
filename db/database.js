@@ -1,18 +1,90 @@
+const mysql = require('mysql2/promise');
 const Database = require('better-sqlite3');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 
-const dbPath = path.join(__dirname, '..', 'prochat.db');
-const db = new Database(dbPath);
+const isMySQL = Boolean(process.env.DB_HOST);
+let mysqlPool = null;
+let sqliteDb = null;
 
-// Enable foreign keys and WAL mode for better concurrency and performance
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+const colors = [
+  '#2563eb', '#0891b2', '#0d9488', '#16a34a', 
+  '#ca8a04', '#ea580c', '#e11d48', '#9333ea', '#4f46e5'
+];
 
-// Initialize tables
-function initDb() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
+async function initDb() {
+  if (isMySQL) {
+    try {
+      mysqlPool = mysql.createPool({
+        host: process.env.DB_HOST,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_NAME,
+        port: parseInt(process.env.DB_PORT || '3306', 10),
+        waitForConnections: true,
+        connectionLimit: 10,
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 10000
+      });
+
+      await mysqlPool.query(`
+        CREATE TABLE IF NOT EXISTS prochat_users (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          username VARCHAR(100) UNIQUE NOT NULL,
+          password_hash VARCHAR(255) NOT NULL,
+          display_name VARCHAR(150) NOT NULL,
+          profession VARCHAR(200) NOT NULL,
+          skills TEXT,
+          bio TEXT,
+          avatar_color VARCHAR(30) DEFAULT '#3b82f6',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_prof (profession)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      await mysqlPool.query(`
+        CREATE TABLE IF NOT EXISTS prochat_world_messages (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          sender_id INT NOT NULL,
+          content TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (sender_id) REFERENCES prochat_users(id) ON DELETE CASCADE,
+          INDEX idx_wm_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      await mysqlPool.query(`
+        CREATE TABLE IF NOT EXISTS prochat_direct_messages (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          sender_id INT NOT NULL,
+          recipient_id INT NOT NULL,
+          content TEXT NOT NULL,
+          is_read TINYINT DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (sender_id) REFERENCES prochat_users(id) ON DELETE CASCADE,
+          FOREIGN KEY (recipient_id) REFERENCES prochat_users(id) ON DELETE CASCADE,
+          INDEX idx_pdm_pair (sender_id, recipient_id, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      console.log('✅ Connected to Hostinger MySQL Database (prochat_* tables)');
+    } catch (err) {
+      console.error('❌ Failed to connect to Hostinger MySQL, falling back to local SQLite:', err.message);
+      initSQLite();
+    }
+  } else {
+    initSQLite();
+  }
+}
+
+function initSQLite() {
+  const dbPath = path.join(__dirname, '..', 'prochat.db');
+  sqliteDb = new Database(dbPath);
+  sqliteDb.pragma('journal_mode = WAL');
+  sqliteDb.pragma('foreign_keys = ON');
+
+  sqliteDb.exec(`
+    CREATE TABLE IF NOT EXISTS prochat_users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL COLLATE NOCASE,
       password_hash TEXT NOT NULL,
@@ -24,167 +96,228 @@ function initDb() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE TABLE IF NOT EXISTS world_messages (
+    CREATE TABLE IF NOT EXISTS prochat_world_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sender_id INTEGER NOT NULL,
       content TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+      FOREIGN KEY (sender_id) REFERENCES prochat_users(id) ON DELETE CASCADE
     );
 
-    CREATE TABLE IF NOT EXISTS direct_messages (
+    CREATE TABLE IF NOT EXISTS prochat_direct_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sender_id INTEGER NOT NULL,
       recipient_id INTEGER NOT NULL,
       content TEXT NOT NULL,
       is_read INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
+      FOREIGN KEY (sender_id) REFERENCES prochat_users(id) ON DELETE CASCADE,
+      FOREIGN KEY (recipient_id) REFERENCES prochat_users(id) ON DELETE CASCADE
     );
 
-    CREATE INDEX IF NOT EXISTS idx_users_profession ON users(profession);
-    CREATE INDEX IF NOT EXISTS idx_world_messages_created ON world_messages(created_at);
-    CREATE INDEX IF NOT EXISTS idx_dm_pair ON direct_messages(sender_id, recipient_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_users_profession ON prochat_users(profession);
+    CREATE INDEX IF NOT EXISTS idx_world_messages_created ON prochat_world_messages(created_at);
+    CREATE INDEX IF NOT EXISTS idx_dm_pair ON prochat_direct_messages(sender_id, recipient_id, created_at);
   `);
-}
-
-// User Helpers
-function createUser({ username, password, display_name, profession, skills = '', bio = '' }) {
-  const password_hash = bcrypt.hashSync(password, 10);
-  // Generate a distinct avatar color from a curated professional palette
-  const colors = [
-    '#2563eb', '#0891b2', '#0d9488', '#16a34a', 
-    '#ca8a04', '#ea580c', '#e11d48', '#9333ea', '#4f46e5'
-  ];
-  const avatar_color = colors[Math.floor(Math.random() * colors.length)];
-
-  const stmt = db.prepare(`
-    INSERT INTO users (username, password_hash, display_name, profession, skills, bio, avatar_color)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  
-  const result = stmt.run(username.trim().toLowerCase(), password_hash, display_name.trim(), profession.trim(), skills.trim(), bio.trim(), avatar_color);
-  return getUserById(result.lastInsertRowid);
-}
-
-function getUserByUsername(username) {
-  const stmt = db.prepare('SELECT * FROM users WHERE username = ?');
-  return stmt.get(username.trim().toLowerCase());
-}
-
-function getUserById(id) {
-  const stmt = db.prepare(`
-    SELECT id, username, display_name, profession, skills, bio, avatar_color, created_at
-    FROM users WHERE id = ?
-  `);
-  return stmt.get(id);
+  console.log('✅ Connected to Local SQLite Database (prochat.db)');
 }
 
 function verifyPassword(plainPassword, passwordHash) {
   return bcrypt.compareSync(plainPassword, passwordHash);
 }
 
-function searchUsers({ query = '', excludeUserId = null }) {
-  let sql = `
-    SELECT id, username, display_name, profession, skills, bio, avatar_color, created_at
-    FROM users
-    WHERE 1=1
-  `;
+// User Helpers
+async function createUser({ username, password, display_name, profession, skills = '', bio = '' }) {
+  const password_hash = bcrypt.hashSync(password, 10);
+  const avatar_color = colors[Math.floor(Math.random() * colors.length)];
+  const cleanUsername = username.trim().toLowerCase();
+  const cleanDisplayName = display_name.trim();
+  const cleanProfession = profession.trim();
+  const cleanSkills = (skills || '').trim();
+  const cleanBio = (bio || '').trim();
+
+  if (mysqlPool) {
+    const [result] = await mysqlPool.query(
+      `INSERT INTO prochat_users (username, password_hash, display_name, profession, skills, bio, avatar_color)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [cleanUsername, password_hash, cleanDisplayName, cleanProfession, cleanSkills, cleanBio, avatar_color]
+    );
+    return getUserById(result.insertId);
+  } else {
+    const stmt = sqliteDb.prepare(`
+      INSERT INTO prochat_users (username, password_hash, display_name, profession, skills, bio, avatar_color)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(cleanUsername, password_hash, cleanDisplayName, cleanProfession, cleanSkills, cleanBio, avatar_color);
+    return getUserById(result.lastInsertRowid);
+  }
+}
+
+async function getUserByUsername(username) {
+  const cleanUsername = username.trim().toLowerCase();
+  if (mysqlPool) {
+    const [rows] = await mysqlPool.query('SELECT * FROM prochat_users WHERE username = ?', [cleanUsername]);
+    return rows[0] || null;
+  } else {
+    const stmt = sqliteDb.prepare('SELECT * FROM prochat_users WHERE username = ?');
+    return stmt.get(cleanUsername) || null;
+  }
+}
+
+async function getUserById(id) {
+  if (mysqlPool) {
+    const [rows] = await mysqlPool.query(
+      'SELECT id, username, display_name, profession, skills, bio, avatar_color, created_at FROM prochat_users WHERE id = ?',
+      [id]
+    );
+    return rows[0] || null;
+  } else {
+    const stmt = sqliteDb.prepare(
+      'SELECT id, username, display_name, profession, skills, bio, avatar_color, created_at FROM prochat_users WHERE id = ?'
+    );
+    return stmt.get(id) || null;
+  }
+}
+
+async function searchUsers({ query = '', excludeUserId = null }) {
   const params = [];
+  let sql = 'SELECT id, username, display_name, profession, skills, bio, avatar_color, created_at FROM prochat_users WHERE 1=1';
 
   if (excludeUserId) {
-    sql += ` AND id != ?`;
+    sql += ' AND id != ?';
     params.push(excludeUserId);
   }
 
   if (query && query.trim()) {
     const q = `%${query.trim()}%`;
-    sql += ` AND (profession LIKE ? OR display_name LIKE ? OR username LIKE ? OR skills LIKE ?)`;
+    sql += ' AND (profession LIKE ? OR display_name LIKE ? OR username LIKE ? OR skills LIKE ?)';
     params.push(q, q, q, q);
   }
 
-  sql += ` ORDER BY display_name ASC LIMIT 50`;
-  const stmt = db.prepare(sql);
-  return stmt.all(...params);
+  sql += ' ORDER BY display_name ASC LIMIT 50';
+
+  if (mysqlPool) {
+    const [rows] = await mysqlPool.query(sql, params);
+    return rows;
+  } else {
+    const stmt = sqliteDb.prepare(sql);
+    return stmt.all(...params);
+  }
 }
 
 // World Message Helpers
-function saveWorldMessage(senderId, content) {
-  const stmt = db.prepare(`
-    INSERT INTO world_messages (sender_id, content)
-    VALUES (?, ?)
-  `);
-  const result = stmt.run(senderId, content);
-  
-  const getStmt = db.prepare(`
-    SELECT m.id, m.content, m.created_at,
-           u.id as sender_id, u.username, u.display_name, u.profession, u.avatar_color
-    FROM world_messages m
-    JOIN users u ON m.sender_id = u.id
-    WHERE m.id = ?
-  `);
-  return getStmt.get(result.lastInsertRowid);
+async function saveWorldMessage(senderId, content) {
+  if (mysqlPool) {
+    const [result] = await mysqlPool.query(
+      'INSERT INTO prochat_world_messages (sender_id, content) VALUES (?, ?)',
+      [senderId, content]
+    );
+    const [rows] = await mysqlPool.query(`
+      SELECT m.id, m.content, m.created_at,
+             u.id as sender_id, u.username, u.display_name, u.profession, u.avatar_color
+      FROM prochat_world_messages m
+      JOIN prochat_users u ON m.sender_id = u.id
+      WHERE m.id = ?
+    `, [result.insertId]);
+    return rows[0];
+  } else {
+    const stmt = sqliteDb.prepare('INSERT INTO prochat_world_messages (sender_id, content) VALUES (?, ?)');
+    const result = stmt.run(senderId, content);
+    const getStmt = sqliteDb.prepare(`
+      SELECT m.id, m.content, m.created_at,
+             u.id as sender_id, u.username, u.display_name, u.profession, u.avatar_color
+      FROM prochat_world_messages m
+      JOIN prochat_users u ON m.sender_id = u.id
+      WHERE m.id = ?
+    `);
+    return getStmt.get(result.lastInsertRowid);
+  }
 }
 
-function getRecentWorldMessages(limit = 100) {
-  const stmt = db.prepare(`
+async function getRecentWorldMessages(limit = 100) {
+  const sql = `
     SELECT m.id, m.content, m.created_at,
            u.id as sender_id, u.username, u.display_name, u.profession, u.avatar_color
-    FROM world_messages m
-    JOIN users u ON m.sender_id = u.id
+    FROM prochat_world_messages m
+    JOIN prochat_users u ON m.sender_id = u.id
     ORDER BY m.created_at ASC
     LIMIT ?
-  `);
-  return stmt.all(limit);
+  `;
+
+  if (mysqlPool) {
+    const [rows] = await mysqlPool.query(sql, [limit]);
+    return rows;
+  } else {
+    const stmt = sqliteDb.prepare(sql);
+    return stmt.all(limit);
+  }
 }
 
 // Direct Message Helpers
-function saveDirectMessage(senderId, recipientId, content) {
-  const stmt = db.prepare(`
-    INSERT INTO direct_messages (sender_id, recipient_id, content)
-    VALUES (?, ?, ?)
-  `);
-  const result = stmt.run(senderId, recipientId, content);
-
-  const getStmt = db.prepare(`
-    SELECT m.id, m.content, m.is_read, m.created_at,
-           m.sender_id, m.recipient_id,
-           u.username as sender_username, u.display_name as sender_name, u.profession as sender_profession, u.avatar_color as sender_color
-    FROM direct_messages m
-    JOIN users u ON m.sender_id = u.id
-    WHERE m.id = ?
-  `);
-  return getStmt.get(result.lastInsertRowid);
+async function saveDirectMessage(senderId, recipientId, content) {
+  if (mysqlPool) {
+    const [result] = await mysqlPool.query(
+      'INSERT INTO prochat_direct_messages (sender_id, recipient_id, content) VALUES (?, ?, ?)',
+      [senderId, recipientId, content]
+    );
+    const [rows] = await mysqlPool.query(`
+      SELECT m.id, m.content, m.is_read, m.created_at,
+             m.sender_id, m.recipient_id,
+             u.username as sender_username, u.display_name as sender_name, u.profession as sender_profession, u.avatar_color as sender_color
+      FROM prochat_direct_messages m
+      JOIN prochat_users u ON m.sender_id = u.id
+      WHERE m.id = ?
+    `, [result.insertId]);
+    return rows[0];
+  } else {
+    const stmt = sqliteDb.prepare('INSERT INTO prochat_direct_messages (sender_id, recipient_id, content) VALUES (?, ?, ?)');
+    const result = stmt.run(senderId, recipientId, content);
+    const getStmt = sqliteDb.prepare(`
+      SELECT m.id, m.content, m.is_read, m.created_at,
+             m.sender_id, m.recipient_id,
+             u.username as sender_username, u.display_name as sender_name, u.profession as sender_profession, u.avatar_color as sender_color
+      FROM prochat_direct_messages m
+      JOIN prochat_users u ON m.sender_id = u.id
+      WHERE m.id = ?
+    `);
+    return getStmt.get(result.lastInsertRowid);
+  }
 }
 
-function getDirectMessagesBetween(user1Id, user2Id, limit = 100) {
-  const stmt = db.prepare(`
+async function getDirectMessagesBetween(user1Id, user2Id, limit = 100) {
+  const sql = `
     SELECT m.id, m.content, m.is_read, m.created_at,
            m.sender_id, m.recipient_id,
            u.username as sender_username, u.display_name as sender_name, u.profession as sender_profession, u.avatar_color as sender_color
-    FROM direct_messages m
-    JOIN users u ON m.sender_id = u.id
+    FROM prochat_direct_messages m
+    JOIN prochat_users u ON m.sender_id = u.id
     WHERE (m.sender_id = ? AND m.recipient_id = ?)
        OR (m.sender_id = ? AND m.recipient_id = ?)
     ORDER BY m.created_at ASC
     LIMIT ?
-  `);
-  return stmt.all(user1Id, user2Id, user2Id, user1Id, limit);
+  `;
+
+  if (mysqlPool) {
+    const [rows] = await mysqlPool.query(sql, [user1Id, user2Id, user2Id, user1Id, limit]);
+    return rows;
+  } else {
+    const stmt = sqliteDb.prepare(sql);
+    return stmt.all(user1Id, user2Id, user2Id, user1Id, limit);
+  }
 }
 
-function markDirectMessagesRead(recipientId, senderId) {
-  const stmt = db.prepare(`
-    UPDATE direct_messages
-    SET is_read = 1
-    WHERE recipient_id = ? AND sender_id = ? AND is_read = 0
-  `);
-  return stmt.run(recipientId, senderId);
+async function markDirectMessagesRead(recipientId, senderId) {
+  const sql = 'UPDATE prochat_direct_messages SET is_read = 1 WHERE recipient_id = ? AND sender_id = ? AND is_read = 0';
+  if (mysqlPool) {
+    await mysqlPool.query(sql, [recipientId, senderId]);
+  } else {
+    const stmt = sqliteDb.prepare(sql);
+    stmt.run(recipientId, senderId);
+  }
 }
 
-function getRecentDirectConversations(userId) {
-  // Returns list of unique users this user has chatted with, plus unread count and latest message
-  const stmt = db.prepare(`
+async function getRecentDirectConversations(userId) {
+  const sql = `
     WITH ChatPartners AS (
       SELECT 
         CASE WHEN sender_id = ? THEN recipient_id ELSE sender_id END AS partner_id,
@@ -196,7 +329,7 @@ function getRecentDirectConversations(userId) {
           PARTITION BY CASE WHEN sender_id = ? THEN recipient_id ELSE sender_id END 
           ORDER BY created_at DESC, id DESC
         ) as rn
-      FROM direct_messages
+      FROM prochat_direct_messages
       WHERE sender_id = ? OR recipient_id = ?
     )
     SELECT 
@@ -206,15 +339,22 @@ function getRecentDirectConversations(userId) {
       cp.sender_id as last_message_sender,
       (
         SELECT COUNT(*) 
-        FROM direct_messages dm 
+        FROM prochat_direct_messages dm 
         WHERE dm.sender_id = u.id AND dm.recipient_id = ? AND dm.is_read = 0
       ) as unread_count
     FROM ChatPartners cp
-    JOIN users u ON cp.partner_id = u.id
+    JOIN prochat_users u ON cp.partner_id = u.id
     WHERE cp.rn = 1
     ORDER BY cp.created_at DESC
-  `);
-  return stmt.all(userId, userId, userId, userId, userId);
+  `;
+
+  if (mysqlPool) {
+    const [rows] = await mysqlPool.query(sql, [userId, userId, userId, userId, userId]);
+    return rows;
+  } else {
+    const stmt = sqliteDb.prepare(sql);
+    return stmt.all(userId, userId, userId, userId, userId);
+  }
 }
 
 module.exports = {
@@ -231,4 +371,3 @@ module.exports = {
   markDirectMessagesRead,
   getRecentDirectConversations
 };
-
