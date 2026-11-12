@@ -6,12 +6,13 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const db = require('./db/database');
-const { BOT_USER, generateBotReply } = require('./bot/ai');
+const { BOT_USER, generateSpecialistPersona, generateBotReply } = require('./bot/ai');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'prochat-secret-key-2026-secure';
 const PORT = process.env.PORT || 3000;
 
 let BOT_USER_ID = null;
+const aiBotUserIds = new Set();
 
 const app = express();
 const server = http.createServer(app);
@@ -212,12 +213,14 @@ app.get('/api/conversations', authenticateToken, async (req, res) => {
 // Map of userId -> Set of socketIds
 const onlineUsers = new Map();
 
-// Helper to broadcast presence including 24/7 AI Bot
+// Helper to broadcast presence including 24/7 AI Bot and dynamic specialists
 function broadcastPresence() {
   const ids = Array.from(onlineUsers.keys());
-  if (BOT_USER_ID && !ids.includes(BOT_USER_ID)) {
-    ids.push(BOT_USER_ID);
-  }
+  aiBotUserIds.forEach(botId => {
+    if (!ids.includes(botId)) {
+      ids.push(botId);
+    }
+  });
   io.emit('presence_update', { onlineUserIds: ids });
 }
 
@@ -269,6 +272,31 @@ io.on('connection', (socket) => {
 
       const savedMessage = await db.saveWorldMessage(userId, content);
       io.to('world_chat').emit('new_world_message', savedMessage);
+
+      // Check if user is summoning a new specialist via @find <profession>
+      const findMatch = content.match(/@find\s+(.+)/i);
+      if (findMatch) {
+        const professionQuery = findMatch[1].trim();
+        if (professionQuery) {
+          setTimeout(async () => {
+            try {
+              console.log(`🔍 Spawning new specialist for "${professionQuery}" requested by ${user.display_name}`);
+              const persona = await generateSpecialistPersona(professionQuery);
+              persona.password = '123456'; // as requested by user
+
+              const newSpecialist = await db.createUser(persona);
+              aiBotUserIds.add(newSpecialist.id);
+              broadcastPresence();
+
+              const welcomeMsg = `@${user.display_name} നമസ്കാരം! ഞാൻ ${newSpecialist.display_name} ആണ് (${newSpecialist.profession}). എന്റെ സഹായം വേണമെങ്കിൽ എനിക്ക് Personal Message അയച്ചാൽ മതി, ഞാൻ സഹായിക്കാം! 👋`;
+              const savedBotMsg = await db.saveWorldMessage(newSpecialist.id, welcomeMsg);
+              io.to('world_chat').emit('new_world_message', savedBotMsg);
+            } catch (err) {
+              console.error('Error creating specialist bot:', err);
+            }
+          }, 600);
+        }
+      }
     } catch (err) {
       console.error('Error handling world message:', err);
       socket.emit('error_message', { message: 'Could not send world message' });
@@ -299,22 +327,24 @@ io.on('connection', (socket) => {
       // Echo back to sender
       io.to(`user_${userId}`).emit('new_direct_message', savedMessage);
 
-      // If recipient is ProBot AI, automatically generate professional reply
-      if (recipientId === BOT_USER_ID) {
+      // If recipient is any AI Specialist Bot (including ProBot)
+      if (aiBotUserIds.has(recipientId) || (recipient && recipient.bio && recipient.bio.includes('[AI Professional]'))) {
+        aiBotUserIds.add(recipientId);
         setTimeout(async () => {
           try {
-            const history = await db.getDirectMessagesBetween(userId, BOT_USER_ID, 8);
+            const history = await db.getDirectMessagesBetween(userId, recipientId, 8);
             const botReply = await generateBotReply({
+              botProfile: recipient,
               userMessage: content,
               userName: user.display_name,
               userProfession: user.profession,
               conversationHistory: history
             });
 
-            const savedBotMsg = await db.saveDirectMessage(BOT_USER_ID, userId, botReply);
+            const savedBotMsg = await db.saveDirectMessage(recipientId, userId, botReply);
             io.to(`user_${userId}`).emit('new_direct_message', savedBotMsg);
           } catch (e) {
-            console.error('ProBot direct reply error:', e);
+            console.error('Specialist personal reply error:', e);
           }
         }, 500);
       }
@@ -364,6 +394,12 @@ async function startServer() {
       console.log(`🤖 Initialized ProBot AI with ID: ${botUser.id}`);
     }
     BOT_USER_ID = botUser.id;
+    aiBotUserIds.add(BOT_USER_ID);
+
+    // Also load any existing dynamically created AI specialist bots
+    const allBots = await db.searchUsers({ query: '[AI Professional]' });
+    allBots.forEach(b => aiBotUserIds.add(b.id));
+    console.log(`🤖 Total active AI specialist bots: ${aiBotUserIds.size}`);
 
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`=================================================`);
