@@ -41,6 +41,7 @@
     worldMessagesList: document.getElementById('worldMessagesList'),
     worldMessageForm: document.getElementById('worldMessageForm'),
     worldMessageInput: document.getElementById('worldMessageInput'),
+    mentionBotBtn: document.getElementById('mentionBotBtn'),
 
     // Direct Chat
     directRecipientAvatar: document.getElementById('directRecipientAvatar'),
@@ -584,6 +585,16 @@
   elements.navDiscover.addEventListener('click', () => switchView('discover'));
 
   // World Message Submit
+  if (elements.mentionBotBtn) {
+    elements.mentionBotBtn.addEventListener('click', () => {
+      const input = elements.worldMessageInput;
+      if (!input.value.includes('@probot')) {
+        input.value = '@probot ' + input.value;
+      }
+      input.focus();
+    });
+  }
+
   elements.worldMessageForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const content = elements.worldMessageInput.value.trim();

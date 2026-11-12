@@ -110,9 +110,13 @@
           </div>
 
           <div class="chat-input-container">
+            <div class="quick-mention-bar">
+              <button type="button" class="mention-pill" id="mentionBotBtn">🤖 Ask @probot</button>
+              <span class="mention-hint">Tag <strong>@probot</strong> or type <strong>probot</strong> to get instant AI answers</span>
+            </div>
             <form id="worldMessageForm" class="message-form">
               <div class="input-wrapper">
-                <input type="text" id="worldMessageInput" placeholder="Share knowledge with the world (Text messages only)..." maxlength="1500" autocomplete="off">
+                <input type="text" id="worldMessageInput" placeholder="Message everyone, or ask @probot anything..." maxlength="1500" autocomplete="off">
               </div>
               <button type="submit" class="btn btn-primary send-btn" id="worldSendBtn">
                 <span>Send</span>
