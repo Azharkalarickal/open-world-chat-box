@@ -651,45 +651,10 @@ body {
 
 /* ================= CHAT INPUT BOX ================= */
 .chat-input-container {
-  padding: 12px 24px 16px 24px;
+  padding: 16px 24px;
   background-color: var(--bg-secondary);
   border-top: 1px solid var(--border-color);
   flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.quick-mention-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.mention-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(59, 130, 246, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  color: #93c5fd;
-  font-size: 0.76rem;
-  font-weight: 600;
-  padding: 3px 10px;
-  border-radius: var(--radius-full);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.mention-pill:hover {
-  background: var(--primary);
-  color: white;
-  transform: translateY(-1px);
-}
-
-.mention-hint {
-  font-size: 0.74rem;
-  color: var(--text-dim);
 }
 
 .message-form {

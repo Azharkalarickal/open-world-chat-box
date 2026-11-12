@@ -269,41 +269,6 @@ io.on('connection', (socket) => {
 
       const savedMessage = await db.saveWorldMessage(userId, content);
       io.to('world_chat').emit('new_world_message', savedMessage);
-
-      // Check if user is asking the bot or mentioning probot / bot / ai
-      const lower = content.toLowerCase();
-      const isCallingBot = 
-        lower.includes('probot') ||
-        lower.includes('@probot') ||
-        lower.includes('@bot') ||
-        lower.includes('bot') ||
-        lower.startsWith('/ai') ||
-        lower.startsWith('!ai') ||
-        (lower.includes('ai') && (lower.includes('help') || lower.includes('?')));
-
-      if (isCallingBot && String(userId) !== String(BOT_USER_ID)) {
-        console.log(`🤖 World Chat: Bot summoned by ${user.display_name}: "${content}"`);
-        setTimeout(async () => {
-          try {
-            const cleanQuery = content
-              .replace(/@?probot/gi, '')
-              .replace(/@?bot/gi, '')
-              .trim();
-
-            const botReply = await generateBotReply({
-              userMessage: cleanQuery || content,
-              userName: user.display_name,
-              userProfession: user.profession
-            });
-
-            console.log(`🤖 World Chat: Bot replying: "${botReply.substring(0, 60)}..."`);
-            const savedBotWorldMsg = await db.saveWorldMessage(BOT_USER_ID, `@${user.display_name} ${botReply}`);
-            io.to('world_chat').emit('new_world_message', savedBotWorldMsg);
-          } catch (e) {
-            console.error('ProBot world chat reply error:', e);
-          }
-        }, 500);
-      }
     } catch (err) {
       console.error('Error handling world message:', err);
       socket.emit('error_message', { message: 'Could not send world message' });
